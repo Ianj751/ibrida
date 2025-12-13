@@ -4,13 +4,9 @@ mod tokenizer;
 
 use std::{env, fs::File, io::Read};
 
-use crate::file_stream::FileCharStream;
 use crate::stream::Stream;
 
-// GOAL: turn
 fn main() {
-    //tokenizer::say_hello();
-
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {
         eprintln!("Usage: {} <path to .ibi file to compile>", &args[0]);
@@ -21,8 +17,6 @@ fn main() {
     let mut contents = String::new();
     file.read_to_string(&mut contents)
         .expect("failed to read file to string");
-
-    //let stream = FileCharStream::new(contents);
 
     println!("contents: {}", contents);
 }
