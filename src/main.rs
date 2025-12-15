@@ -2,7 +2,7 @@ mod tokenizer;
 
 use std::{env, fs::File, io::Read};
 
-use crate::tokenizer::Tokenizer;
+// use crate::tokenizer::tokenizer::Tokenizer;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -16,6 +16,6 @@ fn main() {
     file.read_to_string(&mut contents)
         .expect("failed to read file to string");
 
-    let v = Tokenizer::new(contents).get_token_array();
+    let v = tokenizer::Tokenizer::new(contents).get_tokens();
     dbg!(v);
 }

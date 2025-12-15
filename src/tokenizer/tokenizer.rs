@@ -1,0 +1,195 @@
+use std::{char, collections::HashMap, iter::Peekable, vec::IntoIter};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Token {
+    //Keywords
+    Func,
+    Return,
+    Let,
+
+    //Types
+    Integer, // will change this to more specific types: i32, u8, etc.
+
+    Identifier(String), //name of a variable or function
+    NumberLiteral(String),
+
+    //Operators
+    Addition,
+    Subtraction,
+    Division,
+    Multiplication,
+    Assignment,
+
+    //Delimiters
+    OpenBrace,
+    CloseBrace,
+    OpenParenthesis,
+    CloseParenthesis,
+    Colon, //used for denoting types of vars and return types
+    Semicolon,
+
+    Eof,
+}
+
+// Produces a Vector of tokens to be iterated through by the parser
+pub struct Tokenizer {
+    input_iterator: Peekable<IntoIter<char>>,
+    token_map: HashMap<String, Token>,
+}
+impl Tokenizer {
+    pub fn new(value: String) -> Self {
+        let map = HashMap::from([
+            (String::from("func"), Token::Func),
+            (String::from("let"), Token::Let),
+            (String::from("return"), Token::Return),
+            (String::from("+"), Token::Addition),
+            (String::from("-"), Token::Subtraction),
+            (String::from("/"), Token::Division),
+            (String::from("*"), Token::Multiplication),
+            (String::from("="), Token::Assignment),
+            (String::from("int"), Token::Integer),
+        ]);
+        let value = value.trim().to_owned();
+        Self {
+            input_iterator: value.chars().collect::<Vec<_>>().into_iter().peekable(),
+            token_map: map,
+        }
+    }
+    fn is_delimiter(ch: char) -> bool {
+        matches!(ch, '{' | '}' | '(' | ')' | ':' | ';')
+    }
+
+    // read until next whitespace, return a single token
+    fn get_next_token(&mut self) -> Token {
+        let mut lexeme: Vec<char> = Vec::new();
+
+        // Skip whitespace
+        while self
+            .input_iterator
+            .peek()
+            .is_some_and(|&ch| char::is_whitespace(ch))
+        {
+            self.input_iterator.next();
+        }
+        // should modify this logic for delimiters
+        if let Some(&ch) = self.input_iterator.peek() {
+            if Self::is_delimiter(ch) {
+                self.input_iterator.next();
+                return match ch {
+                    '{' => Token::OpenBrace,
+                    '}' => Token::CloseBrace,
+                    '(' => Token::OpenParenthesis,
+                    ')' => Token::CloseParenthesis,
+                    ':' => Token::Colon,
+                    ';' => Token::Semicolon,
+                    _ => unreachable!(),
+                };
+            }
+        }
+
+        while let Some(&ch) = self.input_iterator.peek() {
+            if char::is_whitespace(ch) || Self::is_delimiter(ch) {
+                break;
+            }
+
+            lexeme.push(self.input_iterator.next().unwrap());
+        }
+
+        let lexeme: String = lexeme.iter().collect();
+        if lexeme.is_empty() {
+            return Token::Eof;
+        }
+
+        if lexeme.parse::<f64>().is_ok() {
+            return Token::NumberLiteral(lexeme);
+        }
+
+        self.token_map
+            .get(&lexeme)
+            .cloned()
+            .unwrap_or_else(|| Token::Identifier(lexeme))
+    }
+
+    pub fn get_tokens(mut self) -> Vec<Token> {
+        let mut v = Vec::new();
+        while let tok = self.get_next_token()
+            && tok != Token::Eof
+        {
+            v.push(tok);
+        }
+        v.push(Token::Eof);
+        v
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+    fn test_get_tokens_keywords() {
+        let file_contents = String::from("  let\t\nfunc return  ");
+        let expected = vec![Token::Let, Token::Func, Token::Return, Token::Eof];
+        let got = Tokenizer::new(file_contents).get_tokens();
+
+        assert_eq!(expected, got);
+    }
+    #[test]
+    fn test_get_tokens_operators() {
+        let file_contents = String::from("  \t\n+\n\t  *  \t\n\n/\t  \n-\n\t  =\t\n  ");
+        let expected = vec![
+            Token::Addition,
+            Token::Multiplication,
+            Token::Division,
+            Token::Subtraction,
+            Token::Assignment,
+            Token::Eof,
+        ];
+        let got = Tokenizer::new(file_contents).get_tokens();
+
+        assert_eq!(expected, got);
+    }
+    #[test]
+    fn test_get_tokens_delimiters() {
+        let file_contents = String::from("  {\t\n  (\t:\n\n;\t  )\n  }  \t{\n(\t\n:\t;\n\n ");
+        let expected = vec![
+            Token::OpenBrace,
+            Token::OpenParenthesis,
+            Token::Colon,
+            Token::Semicolon,
+            Token::CloseParenthesis,
+            Token::CloseBrace,
+            Token::OpenBrace,
+            Token::OpenParenthesis,
+            Token::Colon,
+            Token::Semicolon,
+            Token::Eof,
+        ];
+        let got = Tokenizer::new(file_contents).get_tokens();
+
+        assert_eq!(expected, got);
+    }
+
+    #[test]
+    fn test_main_function1() {
+        let file_contents = "func main(): int { return 69 + 420}".to_string();
+        let expected = vec![
+            Token::Func,
+            Token::Identifier("main".to_string()),
+            Token::OpenParenthesis,
+            Token::CloseParenthesis,
+            Token::Colon,
+            Token::Integer,
+            Token::OpenBrace,
+            Token::Return,
+            Token::NumberLiteral("69".to_string()),
+            Token::Addition,
+            Token::NumberLiteral("420".to_string()),
+            Token::CloseBrace,
+            Token::Eof,
+        ];
+        let got = Tokenizer::new(file_contents).get_tokens();
+        assert_eq!(expected, got);
+    }
+}

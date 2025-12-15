@@ -1,2 +1,2 @@
-1 + 2
-return 69 + 420
+let foo = 69 + 420;
+return foo;
