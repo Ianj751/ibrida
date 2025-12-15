@@ -1,5 +1,4 @@
 func main(): i32 {
-    return 1 + 2
     let foo: i16 = 69;
     let baz: i16 = foo + 420;
     println("Hello, World");

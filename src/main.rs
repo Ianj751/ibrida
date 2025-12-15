@@ -1,4 +1,3 @@
-mod file_stream;
 mod stream;
 mod tokenizer;
 

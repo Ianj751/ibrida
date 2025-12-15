@@ -1,60 +1,79 @@
-use std::{cell::Cell, char, collections::HashMap, vec::IntoIter};
-
-use crate::stream::Stream;
+use std::{char, collections::HashMap, vec::IntoIter};
 
 #[derive(Clone)]
-//for the moment only focus on doing main.ibi:
-// func main(): int { return 69 + 420; }
+
 pub enum Token {
-    KeywordFunc,
-    //    KeywordLet,
-    KeywordReturn,
-    TypeInt,            // will change this to more specific types: i32, u8, etc.
+    Keyw(Keyword),
+    Type(ItemType),     // will change this to more specific types: i32, u8, etc.
     Identifier(String), //name of a variable or function
-    //    Assignment,
     Literal(String),
-    OpAddition,
-    SepOpeningBrace, //{
-    SepClosingBrace, //}
-    SepOpeningParenthesis,
-    SepClosingParenthesis,
-    //    Colon, //used for denoting types of vars and return types
+    Op(Operator),
+    Delim(Delimiter),
+}
+#[derive(Clone)]
+pub enum Keyword {
+    Func,
+    Return,
+}
+#[derive(Clone)]
+pub enum Delimiter {
+    OpeningBrace,
+    ClosingBrace,
+    OpeningParenthesis,
+    ClosingParenthesis,
+    Colon, //used for denoting types of vars and return types
     Semicolon,
 }
-
-// Produces a stream of tokens to be utilized by the parser
+#[derive(Clone)]
+pub enum Operator {
+    Addition,
+    Subtraction,
+    Division,
+    Multiplication,
+    // Assignment,
+}
+#[derive(Clone)]
+pub enum ItemType {
+    Integer,
+}
+// Produces a Vector of tokens to be iterated through by the parser
 pub struct TokenStream {
     content: String,
     input_iterator: IntoIter<char>,
     token_map: HashMap<String, Token>,
+    pub tokens: Vec<Token>,
 }
-impl Stream<Token> for TokenStream {
+impl TokenStream {
     fn new(value: String) -> Self {
         let map = HashMap::from([
-            (String::from("func"), Token::KeywordFunc),
+            (String::from("func"), Token::Keyw(Keyword::Func)),
             //  (String::from("let"), Token::KeywordLet),
-            (String::from("return"), Token::KeywordReturn),
+            (String::from("return"), Token::Keyw(Keyword::Return)),
             //   (String::from("="), Token::Assignment),
-            (String::from("{"), Token::SepOpeningBrace),
-            (String::from("}"), Token::SepClosingBrace),
-            (String::from("("), Token::SepOpeningParenthesis),
-            (String::from(")"), Token::SepClosingParenthesis),
-            //    (String::from(":"), Token::Colon),
+            (String::from("{"), Token::Delim(Delimiter::OpeningBrace)),
+            (String::from("}"), Token::Delim(Delimiter::ClosingBrace)),
+            (
+                String::from("("),
+                Token::Delim(Delimiter::OpeningParenthesis),
+            ),
+            (
+                String::from(")"),
+                Token::Delim(Delimiter::ClosingParenthesis),
+            ),
+            (String::from(":"), Token::Delim(Delimiter::Colon)),
+            (String::from(";"), Token::Delim(Delimiter::Semicolon)),
         ]);
         let value = value.trim().to_owned();
         Self {
             input_iterator: value.chars().collect::<Vec<_>>().into_iter(),
             content: value,
             token_map: map,
+            tokens: Vec::new(),
         }
     }
 
-    fn peek(&self) -> Option<Token> {
-        todo!()
-    }
-
     // read until next whitespace, return a single token
-    fn next(&mut self) -> Option<Token> {
+    fn get_next_token(&mut self) -> Option<Token> {
         let mut lexeme: Vec<char> = Vec::new();
         while let Some(ch) = self.input_iterator.next()
             && !char::is_whitespace(ch)
@@ -71,9 +90,5 @@ impl Stream<Token> for TokenStream {
             .get(&lexeme)
             .cloned()
             .or_else(|| Some(Token::Identifier(lexeme)))
-    }
-
-    fn is_end(&self) -> bool {
-        todo!()
     }
 }
