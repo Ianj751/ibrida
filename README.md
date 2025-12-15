@@ -7,7 +7,7 @@ Ibrida comes from the Latin origin of the english word Hybrid. Chosen because th
 Create a compiler for my own programming language called Ibrida
 
 ### Current Goal Checklist
-- [ ] Implement constructing token vector
+- [x] Implement constructing token vector
 - [ ] Construct an AST with an LL(1) Parser (or maybe a Pratt Parser??) from the token vector
 - [ ] Compile main0.ibi to an executable file
 - [ ] Compile main1.ibi to an executable file
