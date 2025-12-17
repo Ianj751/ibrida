@@ -14,11 +14,7 @@ pub enum Token {
     NumberLiteral(String),
 
     //Operators
-    Addition,
-    Subtraction,
-    Division,
-    Multiplication,
-    Assignment,
+    Op(Operator),
 
     //Delimiters
     OpenBrace,
@@ -29,6 +25,14 @@ pub enum Token {
     Semicolon,
 
     Eof,
+}
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum Operator {
+    Addition,
+    Subtraction,
+    Division,
+    Multiplication,
+    //Assignment,
 }
 
 // Produces a Vector of tokens to be iterated through by the parser
@@ -42,11 +46,11 @@ impl Tokenizer {
             (String::from("func"), Token::Func),
             (String::from("let"), Token::Let),
             (String::from("return"), Token::Return),
-            (String::from("+"), Token::Addition),
-            (String::from("-"), Token::Subtraction),
-            (String::from("/"), Token::Division),
-            (String::from("*"), Token::Multiplication),
-            (String::from("="), Token::Assignment),
+            (String::from("+"), Token::Op(Operator::Addition)),
+            (String::from("-"), Token::Op(Operator::Subtraction)),
+            (String::from("/"), Token::Op(Operator::Division)),
+            (String::from("*"), Token::Op(Operator::Multiplication)),
+            // (String::from("="), Token::Op(Operator::Assignment)),
             (String::from("int"), Token::Integer),
         ]);
         let value = value.trim().to_owned();
@@ -137,13 +141,13 @@ mod tests {
     }
     #[test]
     fn test_get_tokens_operators() {
-        let file_contents = String::from("  \t\n+\n\t  *  \t\n\n/\t  \n-\n\t  =\t\n  ");
+        let file_contents = String::from("  \t\n+\n\t  *  \t\n\n/\t  \n-\n\t  \t\n  ");
         let expected = vec![
-            Token::Addition,
-            Token::Multiplication,
-            Token::Division,
-            Token::Subtraction,
-            Token::Assignment,
+            Token::Op(Operator::Addition),
+            Token::Op(Operator::Multiplication),
+            Token::Op(Operator::Division),
+            Token::Op(Operator::Subtraction),
+            //Token::Op(Operator::Assignment),
             Token::Eof,
         ];
         let got = Tokenizer::new(file_contents).get_tokens();
@@ -184,7 +188,7 @@ mod tests {
             Token::OpenBrace,
             Token::Return,
             Token::NumberLiteral("69".to_string()),
-            Token::Addition,
+            Token::Op(Operator::Addition),
             Token::NumberLiteral("420".to_string()),
             Token::CloseBrace,
             Token::Eof,

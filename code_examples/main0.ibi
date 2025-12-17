@@ -1,2 +1,1 @@
-let foo = 69 + 420;
-return foo;
+return 69 + 420;

@@ -1,3 +1,4 @@
+mod parser;
 mod tokenizer;
 
 use std::{env, fs::File, io::Read};
@@ -16,6 +17,8 @@ fn main() {
     file.read_to_string(&mut contents)
         .expect("failed to read file to string");
 
-    let v = tokenizer::Tokenizer::new(contents).get_tokens();
-    dbg!(v);
+    let v: Vec<tokenizer::Token> = tokenizer::Tokenizer::new(contents).get_tokens();
+    let mut iter = v.into_iter().peekable();
+    let rs = parser::parse_return_stmt(&mut iter);
+    dbg!(rs.unwrap());
 }
