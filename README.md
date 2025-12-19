@@ -8,8 +8,7 @@ Create a compiler for my own programming language called Ibrida
 
 ### Current Goal Checklist
 - [x] Implement constructing token vector
-- [ ] Construct an AST with a Pratt Parser from the token vector
+- [x] Construct an AST for main0.ibi with a Pratt Parser from the token vector
 - [ ] Compile main0.ibi to LLVM IR
 - [ ] Convert the IR to an executable
-- [ ] Compile main1.ibi to an executable file
-- [ ] Compile main2.ibi to an executable file
+- [ ] Do the same for main1.ibi and main2.ibi

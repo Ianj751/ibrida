@@ -1,1 +1,4 @@
-return 69 + 420;
+func main(): i32 {
+    let foo = 69 + -420 * 41 + 13 / -4.2;
+    return 21 + 67;
+}

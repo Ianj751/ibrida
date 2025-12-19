@@ -32,7 +32,7 @@ pub enum Operator {
     Subtraction,
     Division,
     Multiplication,
-    //Assignment,
+    Assignment,
 }
 
 // Produces a Vector of tokens to be iterated through by the parser
@@ -50,8 +50,8 @@ impl Tokenizer {
             (String::from("-"), Token::Op(Operator::Subtraction)),
             (String::from("/"), Token::Op(Operator::Division)),
             (String::from("*"), Token::Op(Operator::Multiplication)),
-            // (String::from("="), Token::Op(Operator::Assignment)),
-            (String::from("int"), Token::Integer),
+            (String::from("="), Token::Op(Operator::Assignment)),
+            (String::from("i32"), Token::Integer),
         ]);
         let value = value.trim().to_owned();
         Self {
@@ -141,13 +141,13 @@ mod tests {
     }
     #[test]
     fn test_get_tokens_operators() {
-        let file_contents = String::from("  \t\n+\n\t  *  \t\n\n/\t  \n-\n\t  \t\n  ");
+        let file_contents = String::from("  \t\n+\n\t  *  \t\n\n/\t  \n-\n\t  =\t\n  ");
         let expected = vec![
             Token::Op(Operator::Addition),
             Token::Op(Operator::Multiplication),
             Token::Op(Operator::Division),
             Token::Op(Operator::Subtraction),
-            //Token::Op(Operator::Assignment),
+            Token::Op(Operator::Assignment),
             Token::Eof,
         ];
         let got = Tokenizer::new(file_contents).get_tokens();
@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn test_main_function1() {
-        let file_contents = "func main(): int { return 69 + 420}".to_string();
+        let file_contents = "func main(): i32 { return 69 + 420;}".to_string();
         let expected = vec![
             Token::Func,
             Token::Identifier("main".to_string()),
@@ -190,6 +190,7 @@ mod tests {
             Token::NumberLiteral("69".to_string()),
             Token::Op(Operator::Addition),
             Token::NumberLiteral("420".to_string()),
+            Token::Semicolon,
             Token::CloseBrace,
             Token::Eof,
         ];

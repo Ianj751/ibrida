@@ -1,3 +1,4 @@
-func main(): int {
-    return 69 + 420;
+func main(): i32 {
+    let foo = 69 + 420 * 4 + 3;
+    return foo;
 }

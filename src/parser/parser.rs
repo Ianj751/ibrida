@@ -2,7 +2,7 @@ use std::{io::Error, iter::Peekable, vec::IntoIter};
 use thiserror::Error;
 
 use crate::{
-    parser::ast::{Expression, Op, ReturnStmt},
+    parser::ast::{BlockStmt, Expression, FuncDecl, LetStmt, ReturnStmt, Stmt},
     tokenizer::{Token, tokenizer::Operator},
 };
 
@@ -19,23 +19,14 @@ pub enum ParseError {
 pub struct Parser {
     tokens: Vec<Token>,
 }
-fn get_op_binding_power(op: &Op) -> (u8, u8) {
+fn get_op_binding_power(op: &Operator) -> (u8, u8) {
     match op {
-        Op::Add | Op::Sub => (1, 2),
-        Op::Div | Op::Mul => (3, 4),
+        Operator::Addition | Operator::Subtraction => (1, 2),
+        Operator::Division | Operator::Multiplication => (3, 4),
+        Operator::Assignment => (0, 0),
     }
 }
-fn token_op_to_node_op(tok: Token) -> Option<Op> {
-    match tok {
-        Token::Op(op) => match op {
-            Operator::Addition => Some(Op::Add),
-            Operator::Subtraction => Some(Op::Sub),
-            Operator::Multiplication => Some(Op::Mul),
-            Operator::Division => Some(Op::Div),
-        },
-        _ => None,
-    }
-}
+
 fn parse_arithmetic_expr(
     iter: &mut Peekable<IntoIter<Token>>,
     min_bp: u8,
@@ -44,7 +35,7 @@ fn parse_arithmetic_expr(
         Some(Token::NumberLiteral(x)) => Expression::UnaryExpr(x),
         t => {
             return Err(ParseError::InvalidToken {
-                expected: Token::NumberLiteral("any number".to_string()),
+                expected: Token::NumberLiteral("number".to_string()),
                 found: t.unwrap_or(Token::Eof),
             });
         }
@@ -52,7 +43,7 @@ fn parse_arithmetic_expr(
     loop {
         let op = match iter.peek() {
             Some(Token::Eof | Token::Semicolon) => break,
-            Some(Token::Op(op)) => token_op_to_node_op(Token::Op(op.clone())).unwrap(),
+            Some(Token::Op(op)) => op.clone(),
             t => {
                 return Err(ParseError::ExpectedOperator(
                     t.unwrap_or(&Token::Eof).clone(),
@@ -69,20 +60,95 @@ fn parse_arithmetic_expr(
     }
     Ok(lhs)
 }
-pub fn parse_return_stmt(iter: &mut Peekable<IntoIter<Token>>) -> Result<ReturnStmt, ParseError> {
-    match iter.peek() {
+fn expect_token(
+    iter: &mut Peekable<IntoIter<Token>>,
+    expected: Token,
+) -> Result<Token, ParseError> {
+    match iter.next() {
         Some(tok) => {
-            if *tok != Token::Return {
+            if tok != expected {
                 return Err(ParseError::InvalidToken {
                     expected: Token::Return,
                     found: tok.clone(),
                 });
             }
+            Ok(tok)
         }
         None => return Err(ParseError::UnexpectedEnd),
-    };
-    iter.next();
+    }
+}
+fn expect_id_token(iter: &mut Peekable<IntoIter<Token>>) -> Result<String, ParseError> {
+    match iter.next() {
+        Some(tok) => match tok.clone() {
+            Token::Identifier(id) => Ok(id),
+            t => {
+                return Err(ParseError::InvalidToken {
+                    expected: Token::Identifier("".to_string()),
+                    found: t,
+                });
+            }
+        },
+        None => return Err(ParseError::UnexpectedEnd),
+    }
+}
+pub fn parse_return_stmt(iter: &mut Peekable<IntoIter<Token>>) -> Result<ReturnStmt, ParseError> {
+    expect_token(iter, Token::Return)?;
+
     let expr = parse_arithmetic_expr(iter, 0)?;
 
+    expect_token(iter, Token::Semicolon)?;
     Ok(ReturnStmt { expression: expr })
+}
+
+pub fn parse_let_stmt(iter: &mut Peekable<IntoIter<Token>>) -> Result<LetStmt, ParseError> {
+    expect_token(iter, Token::Let)?;
+
+    let identifier = expect_id_token(iter)?;
+
+    expect_token(iter, Token::Op(Operator::Assignment))?;
+
+    let expr = parse_arithmetic_expr(iter, 0)?;
+
+    expect_token(iter, Token::Semicolon)?;
+    Ok(LetStmt {
+        lhs: identifier,
+        rhs: expr,
+    })
+}
+
+pub fn parse_fn_decl(iter: &mut Peekable<IntoIter<Token>>) -> Result<FuncDecl, ParseError> {
+    expect_token(iter, Token::Func)?;
+
+    let func_name = expect_id_token(iter)?;
+
+    expect_token(iter, Token::OpenParenthesis)?;
+    //TODO: Impl parameter list parsing
+    expect_token(iter, Token::CloseParenthesis)?;
+
+    expect_token(iter, Token::Colon)?;
+
+    //TODO: Impl return type parsing
+    expect_token(iter, Token::Integer)?;
+    expect_token(iter, Token::OpenBrace)?;
+
+    let mut stmts = Vec::new();
+    while let Some(tok) = iter.peek()
+        && *tok != Token::CloseBrace
+    {
+        let t = tok.clone();
+        if t == Token::Let {
+            let stmt = parse_let_stmt(iter)?;
+            stmts.push(Stmt::VarDecl(stmt));
+        } else if t == Token::Return {
+            let stmt = parse_return_stmt(iter)?;
+            stmts.push(Stmt::Return(stmt));
+        }
+    }
+    expect_token(iter, Token::CloseBrace)?;
+    Ok(FuncDecl {
+        name: func_name,
+        field_list: None,
+        body: BlockStmt { inner: stmts },
+        return_type: String::from("i32"),
+    })
 }

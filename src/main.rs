@@ -3,6 +3,8 @@ mod tokenizer;
 
 use std::{env, fs::File, io::Read};
 
+use crate::parser::parser::parse_fn_decl;
+
 // use crate::tokenizer::tokenizer::Tokenizer;
 
 fn main() {
@@ -19,6 +21,6 @@ fn main() {
 
     let v: Vec<tokenizer::Token> = tokenizer::Tokenizer::new(contents).get_tokens();
     let mut iter = v.into_iter().peekable();
-    let rs = parser::parse_return_stmt(&mut iter);
-    dbg!(rs.unwrap());
+
+    dbg!(parse_fn_decl(&mut iter).unwrap());
 }
