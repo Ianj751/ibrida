@@ -1,4 +1,4 @@
 func main(): i32 {
-    let foo = 69 + 420 * 4 + 3;
+    let foo: i32 = 69 + 420 * 4 + 3;
     return foo;
 }

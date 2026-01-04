@@ -1,4 +1,4 @@
-func main(): i32 {
-    let foo = 69 + -420 * 41 + 13 / -4.2;
+func main(param1: i32, param2: f32, param3: string): i32 {
+    let foo: f32 = 69 + -420 * 41 + 13 / -4.2;
     return 21 + 67;
 }

@@ -8,7 +8,9 @@ pub enum Token {
     Let,
 
     //Types
-    Integer, // will change this to more specific types: i32, u8, etc.
+    Integer32, // will change this to more specific types: i32, u8, etc.
+    Float32,
+    String,
 
     Identifier(String), //name of a variable or function
     NumberLiteral(String),
@@ -23,6 +25,7 @@ pub enum Token {
     CloseParenthesis,
     Colon, //used for denoting types of vars and return types
     Semicolon,
+    Comma,
 
     Eof,
 }
@@ -51,7 +54,9 @@ impl Tokenizer {
             (String::from("/"), Token::Op(Operator::Division)),
             (String::from("*"), Token::Op(Operator::Multiplication)),
             (String::from("="), Token::Op(Operator::Assignment)),
-            (String::from("i32"), Token::Integer),
+            (String::from("i32"), Token::Integer32),
+            (String::from("f32"), Token::Float32),
+            (String::from("string"), Token::String),
         ]);
         let value = value.trim().to_owned();
         Self {
@@ -60,7 +65,7 @@ impl Tokenizer {
         }
     }
     fn is_delimiter(ch: char) -> bool {
-        matches!(ch, '{' | '}' | '(' | ')' | ':' | ';')
+        matches!(ch, '{' | '}' | '(' | ')' | ':' | ';' | ',')
     }
 
     // read until next whitespace, return a single token
@@ -86,6 +91,7 @@ impl Tokenizer {
                     ')' => Token::CloseParenthesis,
                     ':' => Token::Colon,
                     ';' => Token::Semicolon,
+                    ',' => Token::Comma,
                     _ => unreachable!(),
                 };
             }
@@ -184,7 +190,7 @@ mod tests {
             Token::OpenParenthesis,
             Token::CloseParenthesis,
             Token::Colon,
-            Token::Integer,
+            Token::Integer32,
             Token::OpenBrace,
             Token::Return,
             Token::NumberLiteral("69".to_string()),

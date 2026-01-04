@@ -1,4 +1,5 @@
 mod parser;
+mod semanalyzer;
 mod tokenizer;
 
 use std::{env, fs::File, io::Read};
@@ -20,6 +21,7 @@ fn main() {
         .expect("failed to read file to string");
 
     let v: Vec<tokenizer::Token> = tokenizer::Tokenizer::new(contents).get_tokens();
+    dbg!(&v);
     let mut iter = v.into_iter().peekable();
 
     dbg!(parse_fn_decl(&mut iter).unwrap());

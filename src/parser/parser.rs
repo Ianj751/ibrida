@@ -1,8 +1,10 @@
-use std::{io::Error, iter::Peekable, vec::IntoIter};
+use std::{iter::Peekable, vec::IntoIter};
 use thiserror::Error;
 
 use crate::{
-    parser::ast::{BlockStmt, Expression, FuncDecl, LetStmt, ReturnStmt, Stmt},
+    parser::ast::{
+        AssignStmt, BlockStmt, Expression, Field, FuncDecl, LetStmt, ReturnStmt, Stmt, VarType,
+    },
     tokenizer::{Token, tokenizer::Operator},
 };
 
@@ -12,13 +14,15 @@ pub enum ParseError {
     InvalidToken { expected: Token, found: Token },
     #[error("invalid token: expected an operator, but found `{0:?}`")]
     ExpectedOperator(Token),
+    #[error("invalid token: expected a variable type, but found `{0:?}`")]
+    ExpectedType(Token),
     #[error("unexpected end of token stream")]
     UnexpectedEnd,
+    #[error("invalid token to begin the line")] //idk i need a better error for this one
+    InvalidBeginningToken,
 }
 //https://craftinginterpreters.com/parsing-expressions.html
-pub struct Parser {
-    tokens: Vec<Token>,
-}
+
 fn get_op_binding_power(op: &Operator) -> (u8, u8) {
     match op {
         Operator::Addition | Operator::Subtraction => (1, 2),
@@ -68,7 +72,7 @@ fn expect_token(
         Some(tok) => {
             if tok != expected {
                 return Err(ParseError::InvalidToken {
-                    expected: Token::Return,
+                    expected: expected,
                     found: tok.clone(),
                 });
             }
@@ -91,6 +95,19 @@ fn expect_id_token(iter: &mut Peekable<IntoIter<Token>>) -> Result<String, Parse
         None => return Err(ParseError::UnexpectedEnd),
     }
 }
+
+fn expect_type_token(iter: &mut Peekable<IntoIter<Token>>) -> Result<VarType, ParseError> {
+    let kind = match iter.next() {
+        Some(tok) => match tok.clone() {
+            Token::Float32 => VarType::Float32,
+            Token::Integer32 => VarType::Integer32,
+            Token::String => VarType::String,
+            t => return Err(ParseError::ExpectedType(t)),
+        },
+        None => return Err(ParseError::UnexpectedEnd),
+    };
+    Ok(kind)
+}
 pub fn parse_return_stmt(iter: &mut Peekable<IntoIter<Token>>) -> Result<ReturnStmt, ParseError> {
     expect_token(iter, Token::Return)?;
 
@@ -104,6 +121,8 @@ pub fn parse_let_stmt(iter: &mut Peekable<IntoIter<Token>>) -> Result<LetStmt, P
     expect_token(iter, Token::Let)?;
 
     let identifier = expect_id_token(iter)?;
+    expect_token(iter, Token::Colon)?;
+    let var_type = expect_type_token(iter)?;
 
     expect_token(iter, Token::Op(Operator::Assignment))?;
 
@@ -112,6 +131,7 @@ pub fn parse_let_stmt(iter: &mut Peekable<IntoIter<Token>>) -> Result<LetStmt, P
     expect_token(iter, Token::Semicolon)?;
     Ok(LetStmt {
         lhs: identifier,
+        declared_type: var_type,
         rhs: expr,
     })
 }
@@ -122,13 +142,31 @@ pub fn parse_fn_decl(iter: &mut Peekable<IntoIter<Token>>) -> Result<FuncDecl, P
     let func_name = expect_id_token(iter)?;
 
     expect_token(iter, Token::OpenParenthesis)?;
-    //TODO: Impl parameter list parsing
+    let mut fields: Vec<Field> = Vec::new();
+    while let Some(tok) = iter.peek()
+        && *tok != Token::CloseParenthesis
+    {
+        let name = expect_id_token(iter)?;
+        expect_token(iter, Token::Colon)?;
+        let var_type = expect_type_token(iter)?;
+        fields.push(Field {
+            name: name,
+            field_type: var_type,
+        });
+        //expect comma if this is the only field.
+        // if no comma break, else consume comma
+        if let Some(tok) = iter.peek()
+            && *tok != Token::Comma
+        {
+            break;
+        }
+        expect_token(iter, Token::Comma)?;
+    }
     expect_token(iter, Token::CloseParenthesis)?;
 
     expect_token(iter, Token::Colon)?;
 
-    //TODO: Impl return type parsing
-    expect_token(iter, Token::Integer)?;
+    let ret_type_decl = expect_type_token(iter)?;
     expect_token(iter, Token::OpenBrace)?;
 
     let mut stmts = Vec::new();
@@ -136,19 +174,43 @@ pub fn parse_fn_decl(iter: &mut Peekable<IntoIter<Token>>) -> Result<FuncDecl, P
         && *tok != Token::CloseBrace
     {
         let t = tok.clone();
-        if t == Token::Let {
-            let stmt = parse_let_stmt(iter)?;
-            stmts.push(Stmt::VarDecl(stmt));
-        } else if t == Token::Return {
-            let stmt = parse_return_stmt(iter)?;
-            stmts.push(Stmt::Return(stmt));
+
+        match t {
+            Token::Let => {
+                let stmt = parse_let_stmt(iter)?;
+                stmts.push(Stmt::VarDecl(stmt));
+            }
+            Token::Return => {
+                let stmt = parse_return_stmt(iter)?;
+                stmts.push(Stmt::Return(stmt));
+            }
+            Token::Identifier(_) => {
+                // FIXME: when adding function call parsing, consume identifier then based on peek,
+                // if find OpeningParenthesis, parse func_call else assign_stmt
+                let stmt = parse_assign_stmt(iter)?;
+                stmts.push(Stmt::VarAssign(stmt));
+            }
+            _ => return Err(ParseError::InvalidBeginningToken),
         }
     }
     expect_token(iter, Token::CloseBrace)?;
     Ok(FuncDecl {
         name: func_name,
-        field_list: None,
+        field_list: fields,
         body: BlockStmt { inner: stmts },
-        return_type: String::from("i32"),
+        return_type: ret_type_decl,
+    })
+}
+
+fn parse_assign_stmt(iter: &mut Peekable<IntoIter<Token>>) -> Result<AssignStmt, ParseError> {
+    let identifier = expect_id_token(iter)?;
+    expect_token(iter, Token::Op(Operator::Assignment))?;
+
+    let expr = parse_arithmetic_expr(iter, 0)?;
+    expect_token(iter, Token::Semicolon)?;
+
+    Ok(AssignStmt {
+        lhs: identifier,
+        rhs: expr,
     })
 }
