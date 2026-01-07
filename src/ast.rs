@@ -1,9 +1,11 @@
+use std::fmt::{self, Display, Formatter, write};
+
 use crate::tokenizer::Operator;
 
 pub enum AstNode {
     File(Program),
     FunctionDeclaration(FuncDecl),
-    FunctionParameter(Field),
+    FunctionParameters(Vec<Field>),
     BlockStatement(BlockStmt),
     VariableDeclaration(LetStmt),
     VariableAssignment(AssignStmt),
@@ -17,6 +19,17 @@ pub enum VarType {
     Integer32,
     String,
 }
+impl Display for VarType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            VarType::Unknown => String::from("Unknown"),
+            VarType::Float32 => String::from("f32"),
+            VarType::Integer32 => String::from("i32"),
+            VarType::String => String::from("string"),
+        };
+        write!(f, "{}", name)
+    }
+}
 
 // the whole program / file
 pub struct Program {
@@ -27,6 +40,7 @@ pub enum Declaration {
     Func(FuncDecl),
     Var(LetStmt),
 }
+
 //func foo(param1: i32, param2: i16): i32 { return 67;}
 #[derive(Debug)]
 pub struct FuncDecl {

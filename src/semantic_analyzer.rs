@@ -1,8 +1,10 @@
-use std::{collections::HashMap, iter::Scan, option};
+use std::collections::HashMap;
 
 use thiserror::Error;
 
-use crate::ast::{AstNode, VarType};
+use crate::ast::{
+    AssignStmt, AstNode, BlockStmt, Declaration, Field, FuncDecl, LetStmt, Stmt, VarType,
+};
 
 /*
  * Things to check:
@@ -63,7 +65,7 @@ impl SemContext {
             },
         );
     }
-    pub fn lookup_symbol(self, name: &str) -> Option<Symbol> {
+    pub fn lookup_symbol(&self, name: &str) -> Option<Symbol> {
         for tbl in self.scopes.iter().rev() {
             if let Some(sym) = tbl.get(name) {
                 return Some(sym.clone());
@@ -76,6 +78,66 @@ impl SemContext {
     }
 }
 
-// node: node to analyze and append typed version to root
-// operates recursively on root
-pub fn semantic_analyze_node(node: &AstNode, root: &mut TypedNode) {}
+pub struct Visitor {
+    sem_context: SemContext,
+}
+pub trait Visit<T> {
+    fn visit(&mut self, visitable: &T);
+}
+impl Visit<Declaration> for Visitor {
+    fn visit(&mut self, visitable: &Declaration) {
+        match visitable {
+            Declaration::Func(fn_decl) => self.visit(fn_decl),
+            Declaration::Var(let_stmt) => self.visit(let_stmt),
+        }
+    }
+}
+impl Visit<FuncDecl> for Visitor {
+    fn visit(&mut self, visitable: &FuncDecl) {
+        let func_type = format!("func: {}", visitable.return_type.to_string());
+        self.sem_context
+            .add_symbol(&visitable.name, func_type, true);
+        self.visit(&visitable.field_list);
+        self.visit(&visitable.body);
+    }
+}
+impl Visit<Vec<Field>> for Visitor {
+    fn visit(&mut self, visitable: &Vec<Field>) {
+        for param in visitable {
+            self.sem_context
+                .add_symbol(&param.name, param.field_type.to_string(), false);
+        }
+    }
+}
+impl Visit<BlockStmt> for Visitor {
+    fn visit(&mut self, visitable: &BlockStmt) {
+        self.sem_context.enter_scope();
+        for stmt in &visitable.inner {
+            match stmt {
+                Stmt::Return(ret_stmt) => todo!("Compare type of return and function type"), //this should be verified against the return type of func
+                Stmt::VarAssign(assign_stmt) => self.visit(assign_stmt),
+                Stmt::VarDecl(let_stmt) => self.visit(let_stmt),
+            }
+        }
+        self.sem_context.exit_scope();
+    }
+}
+impl Visit<AssignStmt> for Visitor {
+    fn visit(&mut self, visitable: &AssignStmt) {
+        let sym = self.sem_context.lookup_symbol(&visitable.lhs);
+        let ty = match sym {
+            Some(s) => s.symbol_type,
+            None => todo!(), // fail w/ err: assign w/o prev decl
+        };
+        //cmp type of sym and type of expr
+        // if ne fail w/ err, fail w/ err: invalid assignmt
+        todo!();
+    }
+}
+impl Visit<LetStmt> for Visitor {
+    fn visit(&mut self, visitable: &LetStmt) {
+        todo!("compare type of expr and declared_type");
+        self.sem_context
+            .add_symbol(&visitable.lhs, visitable.declared_type.to_string(), true);
+    }
+}
