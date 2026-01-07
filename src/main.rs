@@ -1,10 +1,12 @@
+#[allow(dead_code)] //these fields probably wont be constructed in main
+mod ast;
 mod parser;
-mod semanalyzer;
+mod semantic_analyzer;
 mod tokenizer;
 
 use std::{env, fs::File, io::Read};
 
-use crate::parser::parser::parse_fn_decl;
+use parser::parse_fn_decl;
 
 // use crate::tokenizer::tokenizer::Tokenizer;
 

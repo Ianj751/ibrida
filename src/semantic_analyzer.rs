@@ -2,7 +2,7 @@ use std::{collections::HashMap, iter::Scan, option};
 
 use thiserror::Error;
 
-use crate::parser::ast::{AstNode, VarType};
+use crate::ast::{AstNode, VarType};
 
 /*
  * Things to check:
@@ -58,8 +58,8 @@ impl SemContext {
         last.insert(
             name.to_string(),
             Symbol {
-                symbol_type: symbol_type,
-                is_const: is_const,
+                symbol_type,
+                is_const,
             },
         );
     }

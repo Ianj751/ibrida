@@ -1,12 +1,10 @@
 use std::{iter::Peekable, vec::IntoIter};
 use thiserror::Error;
 
-use crate::{
-    parser::ast::{
-        AssignStmt, BlockStmt, Expression, Field, FuncDecl, LetStmt, ReturnStmt, Stmt, VarType,
-    },
-    tokenizer::{Token, tokenizer::Operator},
+use crate::ast::{
+    AssignStmt, BlockStmt, Expression, Field, FuncDecl, LetStmt, ReturnStmt, Stmt, VarType,
 };
+use crate::tokenizer::{Operator, Token};
 
 #[derive(Debug, Error)]
 pub enum ParseError {
@@ -72,27 +70,25 @@ fn expect_token(
         Some(tok) => {
             if tok != expected {
                 return Err(ParseError::InvalidToken {
-                    expected: expected,
+                    expected,
                     found: tok.clone(),
                 });
             }
             Ok(tok)
         }
-        None => return Err(ParseError::UnexpectedEnd),
+        None => Err(ParseError::UnexpectedEnd),
     }
 }
 fn expect_id_token(iter: &mut Peekable<IntoIter<Token>>) -> Result<String, ParseError> {
     match iter.next() {
         Some(tok) => match tok.clone() {
             Token::Identifier(id) => Ok(id),
-            t => {
-                return Err(ParseError::InvalidToken {
-                    expected: Token::Identifier("".to_string()),
-                    found: t,
-                });
-            }
+            t => Err(ParseError::InvalidToken {
+                expected: Token::Identifier("".to_string()),
+                found: t,
+            }),
         },
-        None => return Err(ParseError::UnexpectedEnd),
+        None => Err(ParseError::UnexpectedEnd),
     }
 }
 
@@ -150,7 +146,7 @@ pub fn parse_fn_decl(iter: &mut Peekable<IntoIter<Token>>) -> Result<FuncDecl, P
         expect_token(iter, Token::Colon)?;
         let var_type = expect_type_token(iter)?;
         fields.push(Field {
-            name: name,
+            name,
             field_type: var_type,
         });
         //expect comma if this is the only field.

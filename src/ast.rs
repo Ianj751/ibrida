@@ -1,4 +1,4 @@
-use crate::tokenizer::tokenizer::Operator;
+use crate::tokenizer::Operator;
 
 pub enum AstNode {
     File(Program),
@@ -9,17 +9,13 @@ pub enum AstNode {
     VariableAssignment(AssignStmt),
     Expression(Expression),
 }
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub enum VarType {
+    #[default]
     Unknown,
     Float32,
     Integer32,
     String,
-}
-impl Default for VarType {
-    fn default() -> Self {
-        VarType::Unknown
-    }
 }
 
 // the whole program / file

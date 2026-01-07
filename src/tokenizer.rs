@@ -81,20 +81,20 @@ impl Tokenizer {
             self.input_iterator.next();
         }
         // should modify this logic for delimiters
-        if let Some(&ch) = self.input_iterator.peek() {
-            if Self::is_delimiter(ch) {
-                self.input_iterator.next();
-                return match ch {
-                    '{' => Token::OpenBrace,
-                    '}' => Token::CloseBrace,
-                    '(' => Token::OpenParenthesis,
-                    ')' => Token::CloseParenthesis,
-                    ':' => Token::Colon,
-                    ';' => Token::Semicolon,
-                    ',' => Token::Comma,
-                    _ => unreachable!(),
-                };
-            }
+        if let Some(&ch) = self.input_iterator.peek()
+            && Self::is_delimiter(ch)
+        {
+            self.input_iterator.next();
+            return match ch {
+                '{' => Token::OpenBrace,
+                '}' => Token::CloseBrace,
+                '(' => Token::OpenParenthesis,
+                ')' => Token::CloseParenthesis,
+                ':' => Token::Colon,
+                ';' => Token::Semicolon,
+                ',' => Token::Comma,
+                _ => unreachable!(),
+            };
         }
 
         while let Some(&ch) = self.input_iterator.peek() {
@@ -117,7 +117,7 @@ impl Tokenizer {
         self.token_map
             .get(&lexeme)
             .cloned()
-            .unwrap_or_else(|| Token::Identifier(lexeme))
+            .unwrap_or(Token::Identifier(lexeme))
     }
 
     pub fn get_tokens(mut self) -> Vec<Token> {
