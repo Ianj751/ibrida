@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use thiserror::Error;
 
 use crate::ast::{
-    AssignStmt, AstNode, BlockStmt, Declaration, Field, FuncDecl, LetStmt, Stmt, VarType,
+    AssignStmt, AstNode, BlockStmt, Declaration, Expression, Field, FuncDecl, LetStmt, Stmt, VarType
 };
 
 /*
@@ -122,7 +122,7 @@ impl SemContext {
     }
 }
 // SA is short for semantic analyzer
-// follows visitorpattern and embeds type info on the AST
+// follows visitorpattern and embeds type info on the AST inplace
 pub struct SAVisitor {
     sem_context: SemContext,
     //validator: TypeValidator, Wraps hashmap containing
@@ -191,4 +191,8 @@ impl Visit<LetStmt> for SAVisitor {
         self.sem_context
             .add_symbol(&visitable.lhs, visitable.declared_type.to_string(), false);
     }
+}
+
+fn typecheck_expr(expr: &mut Expression){
+    
 }

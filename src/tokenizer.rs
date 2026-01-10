@@ -1,5 +1,7 @@
 use std::{char, collections::HashMap, iter::Peekable, vec::IntoIter};
 
+use regex::Regex;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Token {
     //Keywords
@@ -13,7 +15,9 @@ pub enum Token {
     String,
 
     Identifier(String), //name of a variable or function
-    NumberLiteral(String),
+    //NumberLiteral(String),
+    FloatLiteral(String),
+    IntegerLiteral(String),
 
     //Operators
     Op(Operator),
@@ -110,8 +114,14 @@ impl Tokenizer {
             return Token::Eof;
         }
 
-        if lexeme.parse::<f64>().is_ok() {
-            return Token::NumberLiteral(lexeme);
+        let float_regex =
+            Regex::new(r"^[+-]?(?:\d+\.\d+|\d+\.|\.\d+)$").expect("invalid float regex supplied");
+        let int_regex = Regex::new(r"^[+-]?\d+$").expect("invalid int regex supplied");
+
+        if int_regex.is_match(lexeme.as_str()) {
+            return Token::IntegerLiteral(lexeme);
+        } else if float_regex.is_match(lexeme.as_str()) {
+            return Token::FloatLiteral(lexeme);
         }
 
         self.token_map
@@ -182,8 +192,8 @@ mod tests {
     }
 
     #[test]
-    fn test_main_function1() {
-        let file_contents = "func main(): i32 { return 69 + 420;}".to_string();
+    fn test_get_tokens_main() {
+        let file_contents = "func main(): i32 { return 69 + 4.20;}".to_string();
         let expected = vec![
             Token::Func,
             Token::Identifier("main".to_string()),
@@ -193,9 +203,9 @@ mod tests {
             Token::Integer32,
             Token::OpenBrace,
             Token::Return,
-            Token::NumberLiteral("69".to_string()),
+            Token::IntegerLiteral("69".to_string()),
             Token::Op(Operator::Addition),
-            Token::NumberLiteral("420".to_string()),
+            Token::FloatLiteral("4.20".to_string()),
             Token::Semicolon,
             Token::CloseBrace,
             Token::Eof,

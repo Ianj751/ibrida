@@ -18,6 +18,9 @@ pub enum ParseError {
     UnexpectedEnd,
     #[error("invalid token to begin the line")] //idk i need a better error for this one
     InvalidBeginningToken,
+    //denotes that couldnt find a token that fit the category  "expected"
+    #[error("invalid token: expected any {expected}, but found {found:?}")]
+    InvalidTokenKind { expected: String, found: Token },
 }
 //https://craftinginterpreters.com/parsing-expressions.html
 
@@ -34,11 +37,11 @@ fn parse_expression(
     min_bp: u8,
 ) -> Result<Expression, ParseError> {
     let mut lhs = match iter.next() {
-        Some(Token::NumberLiteral(x)) => Expression::UnaryExpr(x, None),
+        Some(Token::IntegerLiteral(x) | Token::FloatLiteral(x)) => Expression::UnaryExpr(x, None),
         Some(Token::Identifier(id)) => Expression::UnaryExpr(id, None),
         t => {
-            return Err(ParseError::InvalidToken {
-                expected: Token::NumberLiteral("number".to_string()),
+            return Err(ParseError::InvalidTokenKind {
+                expected: "expression".to_string(),
                 found: t.unwrap_or(Token::Eof),
             });
         }
@@ -224,13 +227,13 @@ mod tests {
     #[test]
     fn test_parse_expression() {
         // equivalent of:
-        // 1 + 2 * 3;
+        // 1 + 2 * 3.1;
         let tokens = vec![
-            Token::NumberLiteral("1".to_string()),
+            Token::IntegerLiteral("1".to_string()),
             Token::Op(Operator::Addition),
-            Token::NumberLiteral("2".to_string()),
+            Token::IntegerLiteral("2".to_string()),
             Token::Op(Operator::Multiplication),
-            Token::NumberLiteral("3".to_string()),
+            Token::FloatLiteral("3.1".to_string()),
             Token::Semicolon,
         ];
         let mut iter = tokens.into_iter().peekable();
@@ -244,7 +247,7 @@ mod tests {
                     Operator::Multiplication,
                     vec![
                         Expression::UnaryExpr(String::from("2"), None),
-                        Expression::UnaryExpr(String::from("3"), None),
+                        Expression::UnaryExpr(String::from("3.1"), None),
                     ],
                 ),
             ],
@@ -256,10 +259,10 @@ mod tests {
     #[test]
     fn test_parse_return_stmt() {
         // equivalent of:
-        // return 1 + foo;
+        // return 1.2 + foo;
         let tokens = vec![
             Token::Return,
-            Token::NumberLiteral(String::from("1")),
+            Token::FloatLiteral(String::from("1.2")),
             Token::Op(Operator::Addition),
             Token::Identifier(String::from("foo")),
             Token::Semicolon,
@@ -271,7 +274,7 @@ mod tests {
             expression: Expression::BinaryExpr(
                 Operator::Addition,
                 vec![
-                    Expression::UnaryExpr(String::from("1"), None),
+                    Expression::UnaryExpr(String::from("1.2"), None),
                     Expression::UnaryExpr(String::from("foo"), None),
                 ],
             ),
@@ -290,7 +293,7 @@ mod tests {
             Token::Colon,
             Token::Float32,
             Token::Op(Operator::Assignment),
-            Token::NumberLiteral(String::from("1")),
+            Token::IntegerLiteral(String::from("1")),
             Token::Op(Operator::Division),
             Token::Identifier(String::from("bar")),
             Token::Semicolon,
@@ -317,7 +320,7 @@ mod tests {
     #[test]
     fn test_parse_fn_decl() {
         //equivalent of:
-        // fn main(): i32 { return 1 + 2;}
+        // fn main(): i32 { return 1 + 2.2;}
         let tokens = vec![
             Token::Func,
             Token::Identifier(String::from("main")),
@@ -327,9 +330,9 @@ mod tests {
             Token::Integer32,
             Token::OpenBrace,
             Token::Return,
-            Token::NumberLiteral(String::from("1")),
+            Token::IntegerLiteral(String::from("1")),
             Token::Op(Operator::Addition),
-            Token::NumberLiteral(String::from("2")),
+            Token::FloatLiteral(String::from("2.2")),
             Token::Semicolon,
             Token::CloseBrace,
         ];
@@ -341,7 +344,7 @@ mod tests {
                     Operator::Addition,
                     vec![
                         Expression::UnaryExpr(String::from("1"), None),
-                        Expression::UnaryExpr(String::from("2"), None),
+                        Expression::UnaryExpr(String::from("2.2"), None),
                     ],
                 ),
                 checked_expr_type: None,
@@ -359,11 +362,11 @@ mod tests {
     #[test]
     fn test_parse_assign_stmt() {
         // equivalent of:
-        // foo = 69;
+        // foo = 69.1;
         let tokens = vec![
             Token::Identifier(String::from("foo")),
             Token::Op(Operator::Assignment),
-            Token::NumberLiteral(String::from("69")),
+            Token::FloatLiteral(String::from("69.1")),
             Token::Semicolon,
         ];
         let mut iter = tokens.into_iter().peekable();
@@ -371,7 +374,7 @@ mod tests {
         let assign_stmt = parse_assign_stmt(&mut iter);
         let expected = AssignStmt {
             lhs: String::from("foo"),
-            rhs: Expression::UnaryExpr(String::from("69"), None),
+            rhs: Expression::UnaryExpr(String::from("69.1"), None),
             checked_expr_type: None,
         };
         assert_eq!(assign_stmt.unwrap(), expected);
