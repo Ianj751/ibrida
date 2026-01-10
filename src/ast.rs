@@ -1,17 +1,17 @@
-use std::fmt::{self, Display, Formatter, write};
+use std::fmt::{self, Display, Formatter};
 
 use crate::tokenizer::Operator;
 
 pub enum AstNode {
     File(Program),
-    FunctionDeclaration(FuncDecl),
-    FunctionParameters(Vec<Field>),
-    BlockStatement(BlockStmt),
-    VariableDeclaration(LetStmt),
-    VariableAssignment(AssignStmt),
-    Expression(Expression),
+    FunctionDecl(FuncDecl),
+    FunctionParams(Vec<Field>),
+    BlockStmt(BlockStmt),
+    VariableDecl(LetStmt),
+    VariableAssign(AssignStmt),
+    Expr(Expression),
 }
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub enum VarType {
     #[default]
     Unknown,
@@ -42,46 +42,48 @@ pub enum Declaration {
 }
 
 //func foo(param1: i32, param2: i16): i32 { return 67;}
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct FuncDecl {
     pub name: String,
     pub field_list: Vec<Field>,
     pub body: BlockStmt,
-    pub return_type: VarType,
+    pub decl_return_type: VarType,
 }
 
 //param1: i16
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Field {
     pub name: String,
     pub field_type: VarType,
 }
 
 // {let bar = 1.3; return 5;}
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct BlockStmt {
     pub inner: Vec<Stmt>,
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Stmt {
     Return(ReturnStmt),
     VarDecl(LetStmt),
     VarAssign(AssignStmt),
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct ReturnStmt {
     pub expression: Expression,
+    pub checked_expr_type: Option<VarType>,
 }
 
 // 1 - 2 + 3 * 5;
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Expression {
-    UnaryExpr(String),
+    //the vartype here is for the checked type of the literal / id
+    UnaryExpr(String, Option<VarType>),
     BinaryExpr(Operator, Vec<Expression>),
 }
 
 //let foo: i32 = 69;
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct LetStmt {
     //the variable
     pub lhs: String,
@@ -91,8 +93,9 @@ pub struct LetStmt {
 }
 
 // foo = 69;
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct AssignStmt {
     pub lhs: String,
     pub rhs: Expression,
+    pub checked_expr_type: Option<VarType>,
 }

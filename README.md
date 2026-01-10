@@ -5,6 +5,7 @@ Ibrida comes from the Latin origin of the english word Hybrid. Chosen because th
 
 ## The Goal
 Create a compiler for my own programming language called Ibrida
+* NOTE: I'm not too concerned with the error messages at the moment so they kinda suck (no line:char information, possibly innacurate) * 
 
 
 ### Current Goal Checklist
