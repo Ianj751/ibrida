@@ -6,9 +6,10 @@ mod tokenizer;
 
 use std::{env, fs::File, io::Read};
 
-use parser::parse_fn_decl;
-
-// use crate::tokenizer::tokenizer::Tokenizer;
+use crate::{
+    parser::parse_program,
+    tokenizer::{Token, Tokenizer},
+};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -22,9 +23,8 @@ fn main() {
     file.read_to_string(&mut contents)
         .expect("failed to read file to string");
 
-    let v: Vec<tokenizer::Token> = tokenizer::Tokenizer::new(contents).get_tokens();
-    dbg!(&v);
+    let v: Vec<Token> = Tokenizer::new(contents).get_tokens();
     let mut iter = v.into_iter().peekable();
 
-    dbg!(parse_fn_decl(&mut iter).unwrap());
+    dbg!(parse_program(&mut iter).unwrap());
 }

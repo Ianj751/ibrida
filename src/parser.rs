@@ -2,7 +2,8 @@ use std::{iter::Peekable, vec::IntoIter};
 use thiserror::Error;
 
 use crate::ast::{
-    AssignStmt, BlockStmt, Expression, Field, FuncDecl, LetStmt, ReturnStmt, Stmt, VarType,
+    AssignStmt, BlockStmt, Declaration, Expression, Field, FuncDecl, LetStmt, Program, ReturnStmt,
+    Stmt, VarType,
 };
 use crate::tokenizer::{Operator, Token};
 
@@ -37,8 +38,9 @@ fn parse_expression(
     min_bp: u8,
 ) -> Result<Expression, ParseError> {
     let mut lhs = match iter.next() {
-        Some(Token::IntegerLiteral(x) | Token::FloatLiteral(x)) => Expression::UnaryExpr(x, None),
-        Some(Token::Identifier(id)) => Expression::UnaryExpr(id, None),
+        Some(Token::IntegerLiteral(x)) => Expression::UnaryExpr(x, VarType::Integer),
+        Some(Token::FloatLiteral(x)) => Expression::UnaryExpr(x, VarType::Float),
+        Some(Token::Identifier(id)) => Expression::UnaryExpr(id, VarType::Unknown),
         t => {
             return Err(ParseError::InvalidTokenKind {
                 expected: "expression".to_string(),
@@ -99,8 +101,8 @@ fn expect_id_token(iter: &mut Peekable<IntoIter<Token>>) -> Result<String, Parse
 fn expect_type_token(iter: &mut Peekable<IntoIter<Token>>) -> Result<VarType, ParseError> {
     let kind = match iter.next() {
         Some(tok) => match tok.clone() {
-            Token::Float32 => VarType::Float32,
-            Token::Integer32 => VarType::Integer32,
+            Token::Float32 => VarType::Float,
+            Token::Integer32 => VarType::Integer,
             Token::String => VarType::String,
             t => return Err(ParseError::ExpectedType(t)),
         },
@@ -156,8 +158,7 @@ pub fn parse_fn_decl(iter: &mut Peekable<IntoIter<Token>>) -> Result<FuncDecl, P
             name,
             field_type: var_type,
         });
-        //expect comma if this is the only field.
-        // if no comma break, else consume comma
+
         if let Some(tok) = iter.peek()
             && *tok != Token::Comma
         {
@@ -219,6 +220,29 @@ fn parse_assign_stmt(iter: &mut Peekable<IntoIter<Token>>) -> Result<AssignStmt,
     })
 }
 
+pub fn parse_program(iter: &mut Peekable<IntoIter<Token>>) -> Result<Program, ParseError> {
+    let mut declarations = Vec::new();
+    loop {
+        let decl = match iter.peek() {
+            Some(tok) => match tok {
+                Token::Func => {
+                    let func_decl = parse_fn_decl(iter)?;
+                    Declaration::Func(func_decl)
+                }
+                Token::Let => {
+                    let var_decl = parse_let_stmt(iter)?;
+                    Declaration::Var(var_decl)
+                }
+                Token::Eof => break,
+                _ => return Err(ParseError::InvalidBeginningToken),
+            },
+            None => return Err(ParseError::UnexpectedEnd),
+        };
+        declarations.push(decl);
+    }
+    Ok(Program { declarations })
+}
+
 //I know these arent the best tests. Need to test sad path too
 #[cfg(test)]
 mod tests {
@@ -242,12 +266,12 @@ mod tests {
         let expected = Expression::BinaryExpr(
             Operator::Addition,
             vec![
-                Expression::UnaryExpr(String::from("1"), None),
+                Expression::UnaryExpr(String::from("1"), VarType::Integer),
                 Expression::BinaryExpr(
                     Operator::Multiplication,
                     vec![
-                        Expression::UnaryExpr(String::from("2"), None),
-                        Expression::UnaryExpr(String::from("3.1"), None),
+                        Expression::UnaryExpr(String::from("2"), VarType::Integer),
+                        Expression::UnaryExpr(String::from("3.1"), VarType::Float),
                     ],
                 ),
             ],
@@ -274,8 +298,8 @@ mod tests {
             expression: Expression::BinaryExpr(
                 Operator::Addition,
                 vec![
-                    Expression::UnaryExpr(String::from("1.2"), None),
-                    Expression::UnaryExpr(String::from("foo"), None),
+                    Expression::UnaryExpr(String::from("1.2"), VarType::Float),
+                    Expression::UnaryExpr(String::from("foo"), VarType::Unknown),
                 ],
             ),
             checked_expr_type: None,
@@ -304,12 +328,12 @@ mod tests {
         let let_stmt = parse_let_stmt(&mut iter);
         let expected = LetStmt {
             lhs: String::from("foo"),
-            declared_type: VarType::Float32,
+            declared_type: VarType::Float,
             rhs: Expression::BinaryExpr(
                 Operator::Division,
                 vec![
-                    Expression::UnaryExpr(String::from("1"), None),
-                    Expression::UnaryExpr(String::from("bar"), None),
+                    Expression::UnaryExpr(String::from("1"), VarType::Integer),
+                    Expression::UnaryExpr(String::from("bar"), VarType::Unknown),
                 ],
             ),
         };
@@ -320,44 +344,60 @@ mod tests {
     #[test]
     fn test_parse_fn_decl() {
         //equivalent of:
-        // fn main(): i32 { return 1 + 2.2;}
+        // fn add(a: i32, b: i32): i32 { return a + b;}
         let tokens = vec![
             Token::Func,
-            Token::Identifier(String::from("main")),
+            Token::Identifier(String::from("add")),
             Token::OpenParenthesis,
+            Token::Identifier(String::from("a")),
+            Token::Colon,
+            Token::Integer32,
+            Token::Comma,
+            Token::Identifier(String::from("b")),
+            Token::Colon,
+            Token::Integer32,
             Token::CloseParenthesis,
             Token::Colon,
             Token::Integer32,
             Token::OpenBrace,
             Token::Return,
-            Token::IntegerLiteral(String::from("1")),
+            Token::Identifier(String::from("a")),
             Token::Op(Operator::Addition),
-            Token::FloatLiteral(String::from("2.2")),
+            Token::Identifier(String::from("b")),
             Token::Semicolon,
             Token::CloseBrace,
         ];
         let mut iter = tokens.into_iter().peekable();
-        let fn_decl = parse_fn_decl(&mut iter);
+        let got = parse_fn_decl(&mut iter);
         let body = BlockStmt {
             inner: vec![Stmt::Return(ReturnStmt {
                 expression: Expression::BinaryExpr(
                     Operator::Addition,
                     vec![
-                        Expression::UnaryExpr(String::from("1"), None),
-                        Expression::UnaryExpr(String::from("2.2"), None),
+                        Expression::UnaryExpr(String::from("a"), VarType::Unknown),
+                        Expression::UnaryExpr(String::from("b"), VarType::Unknown),
                     ],
                 ),
                 checked_expr_type: None,
             })],
         };
         let expected = FuncDecl {
-            name: String::from("main"),
-            field_list: Vec::new(),
+            name: String::from("add"),
+            field_list: vec![
+                Field {
+                    name: String::from("a"),
+                    field_type: VarType::Integer,
+                },
+                Field {
+                    name: String::from("b"),
+                    field_type: VarType::Integer,
+                },
+            ],
             body,
-            decl_return_type: VarType::Integer32,
+            decl_return_type: VarType::Integer,
         };
-
-        assert_eq!(fn_decl.unwrap(), expected);
+        assert!(got.is_ok());
+        assert_eq!(got.unwrap(), expected);
     }
     #[test]
     fn test_parse_assign_stmt() {
@@ -374,9 +414,59 @@ mod tests {
         let assign_stmt = parse_assign_stmt(&mut iter);
         let expected = AssignStmt {
             lhs: String::from("foo"),
-            rhs: Expression::UnaryExpr(String::from("69.1"), None),
+            rhs: Expression::UnaryExpr(String::from("69.1"), VarType::Float),
             checked_expr_type: None,
         };
         assert_eq!(assign_stmt.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_parse_program() {
+        //equivalente de:
+        // let foo: i32 = 67; func main(): i32 { return 0; }
+        let tokens = vec![
+            Token::Let,
+            Token::Identifier(String::from("foo")),
+            Token::Colon,
+            Token::Integer32,
+            Token::Op(Operator::Assignment),
+            Token::IntegerLiteral(String::from("67")),
+            Token::Semicolon,
+            Token::Func,
+            Token::Identifier(String::from("main")),
+            Token::OpenParenthesis,
+            Token::CloseParenthesis,
+            Token::Colon,
+            Token::Integer32,
+            Token::OpenBrace,
+            Token::Return,
+            Token::IntegerLiteral(String::from("0")),
+            Token::Semicolon,
+            Token::CloseBrace,
+            Token::Eof,
+        ];
+        let mut iter = tokens.into_iter().peekable();
+        let prog = parse_program(&mut iter);
+        let expected = Program {
+            declarations: vec![
+                Declaration::Var(LetStmt {
+                    lhs: String::from("foo"),
+                    declared_type: VarType::Integer,
+                    rhs: Expression::UnaryExpr(String::from("67"), VarType::Integer),
+                }),
+                Declaration::Func(FuncDecl {
+                    name: String::from("main"),
+                    field_list: Vec::new(),
+                    body: BlockStmt {
+                        inner: vec![Stmt::Return(ReturnStmt {
+                            expression: Expression::UnaryExpr(String::from("0"), VarType::Integer),
+                            checked_expr_type: None,
+                        })],
+                    },
+                    decl_return_type: VarType::Integer,
+                }),
+            ],
+        };
+        assert_eq!(expected, prog.unwrap());
     }
 }

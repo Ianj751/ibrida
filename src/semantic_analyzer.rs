@@ -2,22 +2,13 @@ use std::collections::HashMap;
 
 use thiserror::Error;
 
-use crate::ast::{
-    AssignStmt, AstNode, BlockStmt, Declaration, Expression, Field, FuncDecl, LetStmt, Stmt, VarType
+use crate::{
+    ast::{
+        AssignStmt, BlockStmt, Declaration, Expression, Field, FuncDecl, LetStmt, Stmt, VarType,
+    },
+    tokenizer::Operator,
 };
 
-/*
- * Things to check:
- * - The declared type of a variable is appropriate for its assignment and declaration
- *  * if contains decimal point, is float
- * - No multiple variable declarations
- * - No reference w/o declaration
- * - scope validation
- *   *have an array of symbol_tbls,index 0 is global. when come across a new scope append new one to array.
- *      When it ends, pop from end / clear ending symbol table.
- *      When looking up a symbol,
- *      first check from highest index symbol table to lowest
- */
 /*
  * Produces an annotated AST w/ Validated Types
  *
@@ -26,35 +17,36 @@ use crate::ast::{
 pub enum SemanticError {
     #[error("found symbol: {0} which was previously declared")]
     SymbolRedeclaration(String),
-    #[error("found symbol: {0} which was assigned and not previously")]
+    #[error("Unable to assign to symbol {0}")]
     InvalidAssignment(String),
+    #[error("invalid symbol reference: found {0} which was referenced without being initialized")]
+    InvalidSymbolReference(String),
+    #[error("invalid operand types for operator {0:?}")]
+    InvalidOperands(Operator),
+    #[error("Unexpected Value: {0}")] //idk what to put here. Kind of a generic error ig
+    UnexpectedValue(String),
+    #[error("Mismatched Types: got {0} but expected {1}")]
+    MismatchedTypes(String, String),
 }
 // uhh idk what
 #[derive(Debug, Clone)]
-struct Symbol {
-    symbol_type: String,
-    is_const: bool,
+pub struct Symbol {
+    pub symbol_type: String,
+    pub is_const: bool,
 }
 
-// The ast produced by the parser has the declared type
-// the semantic analyzer will produce an ast with types that have been verified
-
-pub struct TypedNode {
-    pub node: AstNode,
-    pub node_type: String, //Not a fan of this, may change to an enum
-                           // pub symbol_id: Option<SymbolId>,
-}
 struct SymbolTable {
     //list of indicies of the children of the given scope / symbol table
     children: Option<Vec<usize>>,
     parent: Option<usize>,
     symbols: HashMap<String, Symbol>,
 }
-struct SemContext {
-    pub scopes: Vec<SymbolTable>,
+pub struct SemContext {
+    scopes: Vec<SymbolTable>,
     // index pointing to the current scope to which new symbols will be added
     curr_scope: usize,
 }
+
 impl SemContext {
     pub fn new() -> Self {
         Self {
@@ -68,21 +60,21 @@ impl SemContext {
     }
 
     pub fn enter_scope(&mut self) {
+        // add a new scope
         self.scopes.push(SymbolTable {
             children: None,
             parent: Some(self.curr_scope),
             symbols: HashMap::new(),
         });
+        //get index of new scope
         let child_idx = self.scopes.len() - 1;
-        // match &mut self.scopes[self.curr_scope].children {
-        //     Some(c) => c.push(child_idx),
-        //     None => self.scopes[self.curr_scope].children = Some(vec![child_idx]),
-        // }
+
+        //add new scope to the children of the current scope
         self.scopes[self.curr_scope]
             .children
             .get_or_insert_with(Vec::new)
             .push(child_idx);
-
+        // update current scope to be chil scope
         self.curr_scope = child_idx;
     }
     pub fn add_symbol(&mut self, name: &str, symbol_type: String, is_const: bool) {
@@ -95,20 +87,19 @@ impl SemContext {
         );
     }
     pub fn lookup_symbol(&self, name: &str) -> Option<&Symbol> {
-        let idx = match self.scopes[self.curr_scope].parent {
-            Some(i) => i,
-            None => return self.scopes[self.curr_scope].symbols.get(name),
-        };
+        if let Some(sym) = self.scopes[self.curr_scope].symbols.get(name) {
+            return Some(sym);
+        }
+        let mut idx = self.scopes[self.curr_scope].parent?;
 
-        //breaks at index: 0 b/c GlobalScope parent is_none
-        // so the second condition is a little redundant
-        while let idx = self.scopes[idx].parent
-            && (idx.is_some() || idx != Some(0))
-        {
-            let tbl = &self.scopes[idx.unwrap()];
-            if let Some(sym) = tbl.symbols.get(name) {
+        loop {
+            if let Some(sym) = self.scopes[idx].symbols.get(name) {
                 return Some(sym);
             }
+            if idx == 0 {
+                break;
+            }
+            idx = self.scopes[idx].parent?;
         }
         None
     }
@@ -126,6 +117,13 @@ impl SemContext {
 pub struct SAVisitor {
     sem_context: SemContext,
     //validator: TypeValidator, Wraps hashmap containing
+}
+impl SAVisitor {
+    pub fn new() -> Self {
+        Self {
+            sem_context: SemContext::new(),
+        }
+    }
 }
 type SAResult = Result<(), SemanticError>;
 pub trait Visit<T> {
@@ -176,23 +174,178 @@ impl Visit<AssignStmt> for SAVisitor {
     fn visit(&mut self, visitable: &mut AssignStmt) -> SAResult {
         let sym = self.sem_context.lookup_symbol(&visitable.lhs);
         let ty = match sym {
-            Some(s) => &s.symbol_type,
-            None => return Err(SemanticError::InvalidAssignment(visitable.lhs.clone())),
+            Some(s) => {
+                if s.is_const {
+                    return Err(SemanticError::InvalidAssignment(visitable.lhs.clone()));
+                }
+                &s.symbol_type
+            }
+            None => return Err(SemanticError::InvalidSymbolReference(visitable.lhs.clone())),
         };
-        //cmp type of sym and type of expr
-        // if ne fail w/ err, fail w/ err: invalid assignmt
-        todo!();
+
+        let expr_ty = typecheck_expr(&mut visitable.rhs, &self.sem_context)?;
+        if expr_ty.to_string() != *ty {
+            return Err(SemanticError::MismatchedTypes(
+                expr_ty.to_string(),
+                ty.clone(),
+            ));
+        }
+
+        visitable.checked_expr_type = Some(expr_ty);
+        Ok(())
     }
 }
 impl Visit<LetStmt> for SAVisitor {
     fn visit(&mut self, visitable: &mut LetStmt) -> SAResult {
-        todo!("compare type of expr and declared_type");
-        //Will have default mutability until refine default mutability logic
+        if self.sem_context.lookup_symbol(&visitable.lhs).is_some() {
+            return Err(SemanticError::SymbolRedeclaration(visitable.lhs.clone()));
+        }
+
         self.sem_context
             .add_symbol(&visitable.lhs, visitable.declared_type.to_string(), false);
+        let expr_ty = typecheck_expr(&mut visitable.rhs, &self.sem_context)?;
+
+        if visitable.declared_type != expr_ty {
+            return Err(SemanticError::MismatchedTypes(
+                visitable.declared_type.to_string(),
+                expr_ty.to_string(),
+            ));
+        }
+
+        Ok(())
     }
 }
 
-fn typecheck_expr(expr: &mut Expression){
-    
+// returns the overall type of the expression and embeds types on the Expression tree
+fn typecheck_expr(expr: &mut Expression, sem_ctx: &SemContext) -> Result<VarType, SemanticError> {
+    match expr {
+        Expression::BinaryExpr(op, children) => {
+            //parser should have already verified that each operator has 2 operands
+            assert!(children.len() == 2);
+            let mut child_types: [VarType; 2] = [VarType::Unknown, VarType::Unknown];
+
+            for (i, child) in children.iter_mut().enumerate() {
+                let ty = typecheck_expr(child, sem_ctx)?;
+                assert!(ty != VarType::Unknown); //would be dumb if it was unknown
+                child_types[i] = ty;
+            }
+            match op {
+                Operator::Addition
+                | Operator::Multiplication
+                | Operator::Division
+                | Operator::Subtraction => {
+                    if child_types[0] == child_types[1] {
+                        match &child_types[0] {
+                            VarType::String => Err(SemanticError::InvalidOperands(op.clone())),
+                            t => Ok(t.clone()),
+                        }
+                    } else if child_types.contains(&VarType::Integer)
+                        && child_types.contains(&VarType::Float)
+                    {
+                        Ok(VarType::Float)
+                    } else {
+                        Err(SemanticError::InvalidOperands(op.clone()))
+                    }
+                }
+                _ => Err(SemanticError::InvalidOperands(op.clone())),
+            }
+        }
+        Expression::UnaryExpr(id, ty) => match ty {
+            VarType::Unknown => match sem_ctx.lookup_symbol(id) {
+                Some(s) => {
+                    //functions are represented in the symbol table as "func: <return_type>"
+                    if s.symbol_type.ends_with("f32") {
+                        *ty = VarType::Float;
+                        Ok(VarType::Float)
+                    } else if s.symbol_type.ends_with("i32") {
+                        *ty = VarType::Integer;
+                        Ok(VarType::Integer)
+                    } else if s.symbol_type.ends_with("string") {
+                        *ty = VarType::String;
+                        Ok(VarType::String)
+                    } else {
+                        Err(SemanticError::UnexpectedValue(s.symbol_type.clone())) //more of a programmer error ig
+                    }
+                }
+                None => Err(SemanticError::InvalidSymbolReference(id.clone())),
+            },
+            t => Ok(t.clone()),
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::vec;
+
+    use super::*;
+
+    #[test]
+    fn test_typecheck_expr_basic_add() {
+        let mut expr = Expression::BinaryExpr(
+            Operator::Addition,
+            vec![
+                Expression::UnaryExpr(String::from("1"), VarType::Integer),
+                Expression::UnaryExpr(String::from("2.1"), VarType::Float),
+            ],
+        );
+        let sem_ctx = SemContext::new();
+        let got = typecheck_expr(&mut expr, &sem_ctx);
+        assert!(got.is_ok());
+
+        assert_eq!(got.unwrap(), VarType::Float);
+    }
+    #[test]
+    fn test_typecheck_expr_ast_embed() {
+        let mut expr = Expression::BinaryExpr(
+            Operator::Addition,
+            vec![
+                Expression::UnaryExpr(String::from("1"), VarType::Integer),
+                Expression::UnaryExpr(String::from("foo"), VarType::Unknown),
+            ],
+        );
+        let mut sem_ctx = SemContext::new();
+        sem_ctx.add_symbol("foo", String::from("f32"), false);
+
+        let got = typecheck_expr(&mut expr, &sem_ctx);
+        assert!(got.is_ok());
+
+        match expr {
+            Expression::BinaryExpr(_, v) => match v.get(1) {
+                Some(Expression::UnaryExpr(_, ty)) => assert!(*ty == VarType::Float),
+                _ => panic!("How did we even get here? Expected UnaryExpr at index 1"),
+            },
+            _ => panic!("How did we even get here? Expected BinaryExpr but got Unary"),
+        }
+
+        assert_eq!(got.unwrap(), VarType::Float);
+    }
+    #[test]
+    fn test_sem_ctx_lookup() {
+        /* Equivalent of:
+            fn add():i32 {...}
+            func main(): i32{
+                let a: i32..
+                {
+                    let b: f32..
+                    add(a, b); //lookup symbols here
+
+                }
+            }
+        */
+        let mut sem_ctx = SemContext::new();
+        sem_ctx.add_symbol("add", String::from("func: i32"), true);
+        sem_ctx.add_symbol("main", String::from("func: i32"), true);
+        sem_ctx.enter_scope();
+        sem_ctx.add_symbol("a", String::from("i32"), false);
+        sem_ctx.enter_scope();
+        sem_ctx.add_symbol("b", String::from("i32"), false);
+
+        assert!(sem_ctx.lookup_symbol("add").is_some());
+        assert!(sem_ctx.lookup_symbol("a").is_some());
+        assert!(sem_ctx.lookup_symbol("b").is_some());
+
+        sem_ctx.exit_scope();
+        assert!(sem_ctx.lookup_symbol("b").is_none());
+    }
 }

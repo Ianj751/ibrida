@@ -15,16 +15,16 @@ pub enum AstNode {
 pub enum VarType {
     #[default]
     Unknown,
-    Float32,
-    Integer32,
+    Float,
+    Integer,
     String,
 }
 impl Display for VarType {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let name = match self {
             VarType::Unknown => String::from("Unknown"),
-            VarType::Float32 => String::from("f32"),
-            VarType::Integer32 => String::from("i32"),
+            VarType::Float => String::from("f32"),
+            VarType::Integer => String::from("i32"),
             VarType::String => String::from("string"),
         };
         write!(f, "{}", name)
@@ -32,10 +32,11 @@ impl Display for VarType {
 }
 
 // the whole program / file
+#[derive(Debug, PartialEq, Eq)]
 pub struct Program {
     pub declarations: Vec<Declaration>,
 }
-// #[derive(PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Declaration {
     Func(FuncDecl),
     Var(LetStmt),
@@ -78,8 +79,8 @@ pub struct ReturnStmt {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Expression {
     //the vartype here is for the checked type of the literal / id
-    UnaryExpr(String, Option<VarType>),
-    BinaryExpr(Operator, Vec<Expression>),
+    UnaryExpr(String, VarType),            //leaf
+    BinaryExpr(Operator, Vec<Expression>), //parent, [lhs, rhs]
 }
 
 //let foo: i32 = 69;

@@ -5,5 +5,6 @@ edition = "2024"
 
 [dependencies]
 regex = "1.12.2"
+# llvm-sys = { version = "180", features = ["force-static"] }
 # inkwell = {version = "0.7.1", features = ["llvm18-1"]}
 thiserror = "2.0.17"

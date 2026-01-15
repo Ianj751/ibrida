@@ -76,7 +76,6 @@ impl Tokenizer {
     fn get_next_token(&mut self) -> Token {
         let mut lexeme: Vec<char> = Vec::new();
 
-        // Skip whitespace
         while self
             .input_iterator
             .peek()
