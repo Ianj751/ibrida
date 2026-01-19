@@ -4,15 +4,12 @@ use thiserror::Error;
 
 use crate::{
     ast::{
-        AssignStmt, BlockStmt, Declaration, Expression, Field, FuncDecl, LetStmt, Stmt, VarType,
+        AssignStmt, BlockStmt, Declaration, Expression, Field, FuncDecl, LetStmt, Program,
+        ReturnStmt, Stmt, VarType,
     },
     tokenizer::Operator,
 };
 
-/*
- * Produces an annotated AST w/ Validated Types
- *
- */
 #[derive(Debug, Error)]
 pub enum SemanticError {
     #[error("found symbol: {0} which was previously declared")]
@@ -25,10 +22,16 @@ pub enum SemanticError {
     InvalidOperands(Operator),
     #[error("Unexpected Value: {0}")] //idk what to put here. Kind of a generic error ig
     UnexpectedValue(String),
-    #[error("Mismatched Types: got {0} but expected {1}")]
-    MismatchedTypes(String, String),
+    #[error("Mismatched Types: got {found} but expected {expected}")]
+    MismatchedTypes { expected: String, found: String },
+    #[error(
+        "Invalid Return Statement: expected return statement of type {expected} but found {found} "
+    )]
+    InvalidFunctionReturn { expected: String, found: String },
+    #[error("{0}")]
+    CustomError(String),
 }
-// uhh idk what
+
 #[derive(Debug, Clone)]
 pub struct Symbol {
     pub symbol_type: String,
@@ -66,15 +69,14 @@ impl SemContext {
             parent: Some(self.curr_scope),
             symbols: HashMap::new(),
         });
-        //get index of new scope
+
         let child_idx = self.scopes.len() - 1;
 
-        //add new scope to the children of the current scope
         self.scopes[self.curr_scope]
             .children
             .get_or_insert_with(Vec::new)
             .push(child_idx);
-        // update current scope to be chil scope
+
         self.curr_scope = child_idx;
     }
     pub fn add_symbol(&mut self, name: &str, symbol_type: String, is_const: bool) {
@@ -116,18 +118,29 @@ impl SemContext {
 // follows visitorpattern and embeds type info on the AST inplace
 pub struct SAVisitor {
     sem_context: SemContext,
-    //validator: TypeValidator, Wraps hashmap containing
+    //maintains a LIFO Queue of the current function return type so that I can
+    // compare the value of return stmt to the decl return type w/o violating visitor pattern
+    func_ret_stack: Vec<VarType>,
 }
 impl SAVisitor {
     pub fn new() -> Self {
         Self {
             sem_context: SemContext::new(),
+            func_ret_stack: Vec::new(),
         }
     }
 }
 type SAResult = Result<(), SemanticError>;
 pub trait Visit<T> {
     fn visit(&mut self, visitable: &mut T) -> SAResult;
+}
+impl Visit<Program> for SAVisitor {
+    fn visit(&mut self, visitable: &mut Program) -> SAResult {
+        for decl in &mut visitable.declarations {
+            self.visit(decl)?;
+        }
+        Ok(())
+    }
 }
 impl Visit<Declaration> for SAVisitor {
     fn visit(&mut self, visitable: &mut Declaration) -> SAResult {
@@ -139,11 +152,16 @@ impl Visit<Declaration> for SAVisitor {
 }
 impl Visit<FuncDecl> for SAVisitor {
     fn visit(&mut self, visitable: &mut FuncDecl) -> SAResult {
+        self.func_ret_stack.push(visitable.decl_return_type.clone());
+
         let func_type = format!("func: {}", visitable.decl_return_type);
         self.sem_context
             .add_symbol(&visitable.name, func_type, true);
+
         self.visit(&mut visitable.field_list)?;
         self.visit(&mut visitable.body)?;
+
+        self.func_ret_stack.pop();
         Ok(())
     }
 }
@@ -161,12 +179,13 @@ impl Visit<BlockStmt> for SAVisitor {
         self.sem_context.enter_scope();
         for stmt in &mut visitable.inner {
             match stmt {
-                Stmt::Return(_) => todo!("Compare type of return and function type"), //this should be verified against the return type of func
+                Stmt::Return(ret_stmt) => self.visit(ret_stmt), //this should be verified against the return type of func
                 Stmt::VarAssign(assign_stmt) => self.visit(assign_stmt),
                 Stmt::VarDecl(let_stmt) => self.visit(let_stmt),
             }?;
         }
         self.sem_context.exit_scope();
+
         Ok(())
     }
 }
@@ -185,10 +204,10 @@ impl Visit<AssignStmt> for SAVisitor {
 
         let expr_ty = typecheck_expr(&mut visitable.rhs, &self.sem_context)?;
         if expr_ty.to_string() != *ty {
-            return Err(SemanticError::MismatchedTypes(
-                expr_ty.to_string(),
-                ty.clone(),
-            ));
+            return Err(SemanticError::MismatchedTypes {
+                found: expr_ty.to_string(),
+                expected: ty.clone(),
+            });
         }
 
         visitable.checked_expr_type = Some(expr_ty);
@@ -206,12 +225,34 @@ impl Visit<LetStmt> for SAVisitor {
         let expr_ty = typecheck_expr(&mut visitable.rhs, &self.sem_context)?;
 
         if visitable.declared_type != expr_ty {
-            return Err(SemanticError::MismatchedTypes(
-                visitable.declared_type.to_string(),
-                expr_ty.to_string(),
-            ));
+            return Err(SemanticError::MismatchedTypes {
+                expected: visitable.declared_type.to_string(),
+                found: expr_ty.to_string(),
+            });
         }
 
+        Ok(())
+    }
+}
+impl Visit<ReturnStmt> for SAVisitor {
+    fn visit(&mut self, visitable: &mut ReturnStmt) -> SAResult {
+        let last = self.func_ret_stack.last();
+        if last.is_none() {
+            return Err(SemanticError::InvalidFunctionReturn {
+                expected: String::from("None"),
+                found: String::from("Some"), //this is a bad error
+            });
+        }
+
+        let last = last.unwrap();
+        let expr_ty = typecheck_expr(&mut visitable.expression, &self.sem_context)?;
+        if *last != expr_ty {
+            return Err(SemanticError::InvalidFunctionReturn {
+                expected: last.to_string(),
+                found: expr_ty.to_string(),
+            });
+        }
+        visitable.checked_expr_type = Some(expr_ty);
         Ok(())
     }
 }
@@ -222,7 +263,7 @@ fn typecheck_expr(expr: &mut Expression, sem_ctx: &SemContext) -> Result<VarType
         Expression::BinaryExpr(op, children) => {
             //parser should have already verified that each operator has 2 operands
             assert!(children.len() == 2);
-            let mut child_types: [VarType; 2] = [VarType::Unknown, VarType::Unknown];
+            let mut child_types = [VarType::Unknown, VarType::Unknown];
 
             for (i, child) in children.iter_mut().enumerate() {
                 let ty = typecheck_expr(child, sem_ctx)?;
@@ -347,5 +388,7 @@ mod tests {
 
         sem_ctx.exit_scope();
         assert!(sem_ctx.lookup_symbol("b").is_none());
+        sem_ctx.exit_scope();
+        assert!(sem_ctx.lookup_symbol("a").is_none());
     }
 }

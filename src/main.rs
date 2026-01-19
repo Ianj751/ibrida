@@ -8,6 +8,7 @@ use std::{env, fs::File, io::Read};
 
 use crate::{
     parser::parse_program,
+    semantic_analyzer::{SAVisitor, Visit},
     tokenizer::{Token, Tokenizer},
 };
 
@@ -26,5 +27,9 @@ fn main() {
     let v: Vec<Token> = Tokenizer::new(contents).get_tokens();
     let mut iter = v.into_iter().peekable();
 
-    dbg!(parse_program(&mut iter).unwrap());
+    let mut file_ast = parse_program(&mut iter).unwrap();
+
+    let mut sem_analyzer = SAVisitor::new();
+    sem_analyzer.visit(&mut file_ast).unwrap();
+    dbg!(file_ast);
 }
