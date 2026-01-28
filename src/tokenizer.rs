@@ -1,4 +1,4 @@
-use std::{char, collections::HashMap, iter::Peekable, vec::IntoIter};
+use std::{char, collections::HashMap, fmt::Display, iter::Peekable, vec::IntoIter};
 
 use regex::Regex;
 
@@ -8,16 +8,19 @@ pub enum Token {
     Func,
     Return,
     Let,
+    If,
+    Else,
 
     //Types
     Integer32, // will change this to more specific types: i32, u8, etc.
     Float32,
-    String,
+    Bool,
 
     Identifier(String), //name of a variable or function
     //NumberLiteral(String),
     FloatLiteral(String),
     IntegerLiteral(String),
+    BoolLiteral(BoolLit),
 
     //Operators
     Op(Operator),
@@ -39,9 +42,65 @@ pub enum Operator {
     Subtraction,
     Division,
     Multiplication,
+    Modulo,
     Assignment,
+    BoolAnd,
+    BoolOr,
+    BoolNot,
+    BoolEq,
+    Less,
+    LessEq,
+    Greater,
+    GreaterEq,
+    NotEq,
 }
-
+impl Operator {
+    pub fn is_arithmetic(&self) -> bool {
+        matches!(
+            *self,
+            Operator::Addition
+                | Operator::Multiplication
+                | Operator::Division
+                | Operator::Subtraction
+                | Operator::Modulo
+        )
+    }
+    pub fn is_boolean(&self) -> bool {
+        matches!(
+            self,
+            Operator::BoolAnd
+                | Operator::BoolEq
+                | Operator::BoolNot
+                | Operator::BoolOr
+                | Operator::Greater
+                | Operator::GreaterEq
+                | Operator::Less
+                | Operator::LessEq
+                | Operator::NotEq
+        )
+    }
+    pub fn is_comparison(&self) -> bool {
+        matches!(self, |Operator::BoolEq| Operator::Greater
+            | Operator::GreaterEq
+            | Operator::Less
+            | Operator::LessEq
+            | Operator::NotEq)
+    }
+}
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum BoolLit {
+    True,
+    False,
+}
+impl Display for BoolLit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            BoolLit::False => String::from("false"),
+            BoolLit::True => String::from("true"),
+        };
+        write!(f, "{}", name)
+    }
+}
 // Produces a Vector of tokens to be iterated through by the parser
 pub struct Tokenizer {
     input_iterator: Peekable<IntoIter<char>>,
@@ -49,6 +108,7 @@ pub struct Tokenizer {
 }
 impl Tokenizer {
     pub fn new(value: String) -> Self {
+        //i wonder if this is the best way to do this
         let map = HashMap::from([
             (String::from("func"), Token::Func),
             (String::from("let"), Token::Let),
@@ -57,10 +117,23 @@ impl Tokenizer {
             (String::from("-"), Token::Op(Operator::Subtraction)),
             (String::from("/"), Token::Op(Operator::Division)),
             (String::from("*"), Token::Op(Operator::Multiplication)),
+            (String::from("%"), Token::Op(Operator::Modulo)),
             (String::from("="), Token::Op(Operator::Assignment)),
+            (String::from("&&"), Token::Op(Operator::BoolAnd)),
+            (String::from("||"), Token::Op(Operator::BoolOr)),
+            (String::from(">"), Token::Op(Operator::Greater)),
+            (String::from(">="), Token::Op(Operator::GreaterEq)),
+            (String::from("<"), Token::Op(Operator::Less)),
+            (String::from("<="), Token::Op(Operator::LessEq)),
+            (String::from("!="), Token::Op(Operator::NotEq)),
+            (String::from("=="), Token::Op(Operator::BoolEq)),
             (String::from("i32"), Token::Integer32),
             (String::from("f32"), Token::Float32),
-            (String::from("string"), Token::String),
+            (String::from("bool"), Token::Bool),
+            (String::from("if"), Token::If),
+            (String::from("else"), Token::Else),
+            (String::from("true"), Token::BoolLiteral(BoolLit::True)),
+            (String::from("false"), Token::BoolLiteral(BoolLit::False)),
         ]);
         let value = value.trim().to_owned();
         Self {
@@ -69,7 +142,9 @@ impl Tokenizer {
         }
     }
     fn is_delimiter(ch: char) -> bool {
-        matches!(ch, '{' | '}' | '(' | ')' | ':' | ';' | ',')
+        // '!' is secretly not a delimiter, shhhh
+        // just using it b/c this handles tokens w/o spaces btwn well
+        matches!(ch, '{' | '}' | '(' | ')' | ':' | ';' | ',' | '!')
     }
 
     // read until next whitespace, return a single token
@@ -96,6 +171,7 @@ impl Tokenizer {
                 ':' => Token::Colon,
                 ';' => Token::Semicolon,
                 ',' => Token::Comma,
+                '!' => Token::Op(Operator::BoolNot),
                 _ => unreachable!(),
             };
         }
@@ -147,7 +223,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_get_tokens_keywords() {
+    fn test_tokens_keywords() {
         let file_contents = String::from("  let\t\nfunc return  ");
         let expected = vec![Token::Let, Token::Func, Token::Return, Token::Eof];
         let got = Tokenizer::new(file_contents).get_tokens();
@@ -155,7 +231,7 @@ mod tests {
         assert_eq!(expected, got);
     }
     #[test]
-    fn test_get_tokens_operators() {
+    fn test_tokens_operators() {
         let file_contents = String::from("  \t\n+\n\t  *  \t\n\n/\t  \n-\n\t  =\t\n  ");
         let expected = vec![
             Token::Op(Operator::Addition),
@@ -170,7 +246,7 @@ mod tests {
         assert_eq!(expected, got);
     }
     #[test]
-    fn test_get_tokens_delimiters() {
+    fn test_tokens_delimiters() {
         let file_contents = String::from("  {\t\n  (\t:\n\n;\t  )\n  }  \t{\n(\t\n:\t;\n\n ");
         let expected = vec![
             Token::OpenBrace,
@@ -191,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_tokens_main() {
+    fn test_tokens_main() {
         let file_contents = "func main(): i32 { return 69 + 4.20;}".to_string();
         let expected = vec![
             Token::Func,
@@ -211,5 +287,26 @@ mod tests {
         ];
         let got = Tokenizer::new(file_contents).get_tokens();
         assert_eq!(expected, got);
+    }
+    #[test]
+    fn test_tokens_bool() {
+        let file_contents = "(true && false || !true) == !false".to_string();
+        let expected = vec![
+            Token::OpenParenthesis,
+            Token::BoolLiteral(BoolLit::True),
+            Token::Op(Operator::BoolAnd),
+            Token::BoolLiteral(BoolLit::False),
+            Token::Op(Operator::BoolOr),
+            Token::Op(Operator::BoolNot),
+            Token::BoolLiteral(BoolLit::True),
+            Token::CloseParenthesis,
+            Token::Op(Operator::BoolEq),
+            Token::Op(Operator::BoolNot),
+            Token::BoolLiteral(BoolLit::False),
+            Token::Eof,
+        ];
+
+        let received = Tokenizer::new(file_contents).get_tokens();
+        assert_eq!(expected, received);
     }
 }

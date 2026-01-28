@@ -1,5 +1,6 @@
 #[allow(dead_code)] //these fields probably wont be constructed in main
 mod ast;
+mod codegen;
 mod parser;
 mod semantic_analyzer;
 mod tokenizer;

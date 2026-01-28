@@ -1,9 +1,10 @@
+use std::panic;
 use std::{iter::Peekable, vec::IntoIter};
 use thiserror::Error;
 
 use crate::ast::{
-    AssignStmt, BlockStmt, Declaration, Expression, Field, FuncDecl, LetStmt, Program, ReturnStmt,
-    Stmt, VarType,
+    AssignStmt, BlockStmt, Declaration, ElseStmt, Expression, Field, FuncDecl, IfStmt, LetStmt,
+    Program, ReturnStmt, Stmt, VarType,
 };
 use crate::tokenizer::{Operator, Token};
 
@@ -24,23 +25,51 @@ pub enum ParseError {
     InvalidTokenKind { expected: String, found: Token },
 }
 //https://craftinginterpreters.com/parsing-expressions.html
-
-fn get_op_binding_power(op: &Operator) -> (u8, u8) {
+// ones with 2 operands
+// https://en.cppreference.com/w/c/language/operator_precedence.html
+fn infix_binding_power(op: &Operator) -> (u8, u8) {
     match op {
-        Operator::Addition | Operator::Subtraction => (1, 2),
-        Operator::Division | Operator::Multiplication => (3, 4),
-        Operator::Assignment => (0, 0),
+        Operator::Addition | Operator::Subtraction => (22, 23),
+        Operator::Division | Operator::Multiplication | Operator::Modulo => (24, 25),
+        Operator::Less | Operator::LessEq | Operator::Greater | Operator::GreaterEq => (18, 19),
+        Operator::BoolEq | Operator::NotEq => (16, 17),
+        Operator::BoolAnd => (8, 9),
+        Operator::BoolOr => (6, 7),
+        Operator::Assignment => (2, 3),
+        _ => panic!("bad op: {:?}", op),
+    }
+}
+// ones with 1 operand
+fn prefix_binding_power(op: &Operator) -> ((), u8) {
+    match op {
+        Operator::BoolNot => ((), 27),
+        _ => panic!("bad op: {:?}", op),
     }
 }
 //this is kinda turning into an rvalue parser
+// robbed from: https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html
 fn parse_expression(
     iter: &mut Peekable<IntoIter<Token>>,
     min_bp: u8,
 ) -> Result<Expression, ParseError> {
     let mut lhs = match iter.next() {
-        Some(Token::IntegerLiteral(x)) => Expression::UnaryExpr(x, VarType::Integer),
-        Some(Token::FloatLiteral(x)) => Expression::UnaryExpr(x, VarType::Float),
-        Some(Token::Identifier(id)) => Expression::UnaryExpr(id, VarType::Unknown),
+        Some(Token::IntegerLiteral(x)) => Expression::Literal(x, VarType::Integer),
+        Some(Token::FloatLiteral(x)) => Expression::Literal(x, VarType::Float),
+        Some(Token::BoolLiteral(b)) => Expression::Literal(b.to_string(), VarType::Bool),
+        Some(Token::Identifier(id)) => Expression::Var(id, VarType::Unknown),
+        Some(Token::OpenParenthesis) => {
+            let lhs = parse_expression(iter, 0)?;
+            expect_token(iter, Token::CloseParenthesis)?;
+            lhs
+        }
+        Some(Token::Op(op)) => {
+            let ((), right_bp) = prefix_binding_power(&op);
+            let rhs = parse_expression(iter, right_bp)?;
+            Expression::UnaryExpr {
+                op,
+                operand: Box::new(rhs),
+            }
+        }
         t => {
             return Err(ParseError::InvalidTokenKind {
                 expected: "expression".to_string(),
@@ -48,9 +77,10 @@ fn parse_expression(
             });
         }
     };
+
     loop {
         let op = match iter.peek() {
-            Some(Token::Eof | Token::Semicolon) => break,
+            Some(Token::Semicolon | Token::OpenBrace | Token::CloseParenthesis) => break,
             Some(Token::Op(op)) => op.clone(),
             t => {
                 return Err(ParseError::ExpectedOperator(
@@ -58,13 +88,17 @@ fn parse_expression(
                 ));
             }
         };
-        let (left_bp, right_bp) = get_op_binding_power(&op);
+        let (left_bp, right_bp) = infix_binding_power(&op);
         if left_bp < min_bp {
             break;
         }
         iter.next();
         let rhs = parse_expression(iter, right_bp)?;
-        lhs = Expression::BinaryExpr(op, vec![lhs, rhs])
+        lhs = Expression::BinaryExpr {
+            op,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+        }
     }
     Ok(lhs)
 }
@@ -102,8 +136,9 @@ fn expect_type_token(iter: &mut Peekable<IntoIter<Token>>) -> Result<VarType, Pa
     let kind = match iter.next() {
         Some(tok) => match tok.clone() {
             Token::Float32 => VarType::Float,
+            Token::Bool => VarType::Bool,
             Token::Integer32 => VarType::Integer,
-            Token::String => VarType::String,
+
             t => return Err(ParseError::ExpectedType(t)),
         },
         None => return Err(ParseError::UnexpectedEnd),
@@ -140,6 +175,43 @@ pub fn parse_let_stmt(iter: &mut Peekable<IntoIter<Token>>) -> Result<LetStmt, P
         rhs: expr,
     })
 }
+fn parse_block_stmt(iter: &mut Peekable<IntoIter<Token>>) -> Result<BlockStmt, ParseError> {
+    expect_token(iter, Token::OpenBrace)?;
+    let mut stmts = Vec::new();
+    while let Some(tok) = iter.peek()
+        && *tok != Token::CloseBrace
+    {
+        let t = tok.clone();
+
+        match t {
+            Token::Let => {
+                let stmt = parse_let_stmt(iter)?;
+                stmts.push(Stmt::VarDecl(stmt));
+            }
+            Token::Return => {
+                let stmt = parse_return_stmt(iter)?;
+                stmts.push(Stmt::Return(stmt));
+            }
+            Token::Identifier(_) => {
+                // FIXME: when adding function call parsing, consume identifier then based on peek,
+                // if find OpeningParenthesis, parse func_call else assign_stmt
+                let stmt = parse_assign_stmt(iter)?;
+                stmts.push(Stmt::VarAssign(stmt));
+            }
+            Token::If => {
+                let stmt = parse_if_stmt(iter)?;
+                stmts.push(Stmt::IfStmt(stmt));
+            }
+            Token::Else => {
+                let stmt = parse_else_stmt(iter)?;
+                stmts.push(Stmt::Else(stmt));
+            }
+            _ => return Err(ParseError::InvalidBeginningToken),
+        }
+    }
+    expect_token(iter, Token::CloseBrace)?;
+    Ok(BlockStmt { inner: stmts })
+}
 
 pub fn parse_fn_decl(iter: &mut Peekable<IntoIter<Token>>) -> Result<FuncDecl, ParseError> {
     expect_token(iter, Token::Func)?;
@@ -171,37 +243,13 @@ pub fn parse_fn_decl(iter: &mut Peekable<IntoIter<Token>>) -> Result<FuncDecl, P
     expect_token(iter, Token::Colon)?;
 
     let ret_type_decl = expect_type_token(iter)?;
-    expect_token(iter, Token::OpenBrace)?;
 
-    let mut stmts = Vec::new();
-    while let Some(tok) = iter.peek()
-        && *tok != Token::CloseBrace
-    {
-        let t = tok.clone();
+    let body = parse_block_stmt(iter)?;
 
-        match t {
-            Token::Let => {
-                let stmt = parse_let_stmt(iter)?;
-                stmts.push(Stmt::VarDecl(stmt));
-            }
-            Token::Return => {
-                let stmt = parse_return_stmt(iter)?;
-                stmts.push(Stmt::Return(stmt));
-            }
-            Token::Identifier(_) => {
-                // FIXME: when adding function call parsing, consume identifier then based on peek,
-                // if find OpeningParenthesis, parse func_call else assign_stmt
-                let stmt = parse_assign_stmt(iter)?;
-                stmts.push(Stmt::VarAssign(stmt));
-            }
-            _ => return Err(ParseError::InvalidBeginningToken),
-        }
-    }
-    expect_token(iter, Token::CloseBrace)?;
     Ok(FuncDecl {
         name: func_name,
         field_list: fields,
-        body: BlockStmt { inner: stmts },
+        body,
         decl_return_type: ret_type_decl,
     })
 }
@@ -218,6 +266,39 @@ fn parse_assign_stmt(iter: &mut Peekable<IntoIter<Token>>) -> Result<AssignStmt,
         rhs: expr,
         checked_expr_type: None,
     })
+}
+fn parse_if_stmt(iter: &mut Peekable<IntoIter<Token>>) -> Result<IfStmt, ParseError> {
+    expect_token(iter, Token::If)?;
+
+    //no need for parenthesis in the if cond
+    // you can if you want to tho
+    expect_token(iter, Token::OpenParenthesis)?;
+    let condition = parse_expression(iter, 0)?;
+    expect_token(iter, Token::CloseParenthesis)?;
+
+    let body = parse_block_stmt(iter)?;
+
+    if let Some(tok) = iter.peek()
+        && *tok == Token::Else
+    {
+        let else_stmt = parse_else_stmt(iter)?;
+        Ok(IfStmt {
+            body,
+            condition,
+            else_stmt: Some(else_stmt),
+        })
+    } else {
+        Ok(IfStmt {
+            body,
+            condition,
+            else_stmt: None,
+        })
+    }
+}
+fn parse_else_stmt(iter: &mut Peekable<IntoIter<Token>>) -> Result<ElseStmt, ParseError> {
+    expect_token(iter, Token::Else)?;
+    let body = parse_block_stmt(iter)?;
+    Ok(ElseStmt { body })
 }
 
 pub fn parse_program(iter: &mut Peekable<IntoIter<Token>>) -> Result<Program, ParseError> {
@@ -246,6 +327,8 @@ pub fn parse_program(iter: &mut Peekable<IntoIter<Token>>) -> Result<Program, Pa
 //I know these arent the best tests. Need to test sad path too
 #[cfg(test)]
 mod tests {
+    use crate::tokenizer::BoolLit;
+
     use super::*;
 
     #[test]
@@ -263,19 +346,17 @@ mod tests {
         let mut iter = tokens.into_iter().peekable();
 
         let expr = parse_expression(&mut iter, 0);
-        let expected = Expression::BinaryExpr(
-            Operator::Addition,
-            vec![
-                Expression::UnaryExpr(String::from("1"), VarType::Integer),
-                Expression::BinaryExpr(
-                    Operator::Multiplication,
-                    vec![
-                        Expression::UnaryExpr(String::from("2"), VarType::Integer),
-                        Expression::UnaryExpr(String::from("3.1"), VarType::Float),
-                    ],
-                ),
-            ],
-        );
+        let expected = Expression::BinaryExpr {
+            op: Operator::Addition,
+
+            lhs: Box::new(Expression::Literal(String::from("1"), VarType::Integer)),
+            rhs: Box::new(Expression::BinaryExpr {
+                op: Operator::Multiplication,
+
+                lhs: Box::new(Expression::Literal(String::from("2"), VarType::Integer)),
+                rhs: Box::new(Expression::Literal(String::from("3.1"), VarType::Float)),
+            }),
+        };
 
         assert_eq!(expr.unwrap(), expected);
     }
@@ -295,13 +376,11 @@ mod tests {
 
         let ret_stmt = parse_return_stmt(&mut iter);
         let expected = ReturnStmt {
-            expression: Expression::BinaryExpr(
-                Operator::Addition,
-                vec![
-                    Expression::UnaryExpr(String::from("1.2"), VarType::Float),
-                    Expression::UnaryExpr(String::from("foo"), VarType::Unknown),
-                ],
-            ),
+            expression: Expression::BinaryExpr {
+                op: Operator::Addition,
+                lhs: Box::new(Expression::Literal(String::from("1.2"), VarType::Float)),
+                rhs: Box::new(Expression::Var(String::from("foo"), VarType::Unknown)),
+            },
             checked_expr_type: None,
         };
         assert_eq!(ret_stmt.unwrap(), expected);
@@ -329,13 +408,12 @@ mod tests {
         let expected = LetStmt {
             lhs: String::from("foo"),
             declared_type: VarType::Float,
-            rhs: Expression::BinaryExpr(
-                Operator::Division,
-                vec![
-                    Expression::UnaryExpr(String::from("1"), VarType::Integer),
-                    Expression::UnaryExpr(String::from("bar"), VarType::Unknown),
-                ],
-            ),
+            rhs: Expression::BinaryExpr {
+                op: Operator::Division,
+
+                lhs: Box::new(Expression::Literal(String::from("1"), VarType::Integer)),
+                rhs: Box::new(Expression::Var(String::from("bar"), VarType::Unknown)),
+            },
         };
 
         assert_eq!(let_stmt.unwrap(), expected);
@@ -371,13 +449,11 @@ mod tests {
         let got = parse_fn_decl(&mut iter);
         let body = BlockStmt {
             inner: vec![Stmt::Return(ReturnStmt {
-                expression: Expression::BinaryExpr(
-                    Operator::Addition,
-                    vec![
-                        Expression::UnaryExpr(String::from("a"), VarType::Unknown),
-                        Expression::UnaryExpr(String::from("b"), VarType::Unknown),
-                    ],
-                ),
+                expression: Expression::BinaryExpr {
+                    op: Operator::Addition,
+                    lhs: Box::new(Expression::Var(String::from("a"), VarType::Unknown)),
+                    rhs: Box::new(Expression::Var(String::from("b"), VarType::Unknown)),
+                },
                 checked_expr_type: None,
             })],
         };
@@ -414,7 +490,7 @@ mod tests {
         let assign_stmt = parse_assign_stmt(&mut iter);
         let expected = AssignStmt {
             lhs: String::from("foo"),
-            rhs: Expression::UnaryExpr(String::from("69.1"), VarType::Float),
+            rhs: Expression::Literal(String::from("69.1"), VarType::Float),
             checked_expr_type: None,
         };
         assert_eq!(assign_stmt.unwrap(), expected);
@@ -452,14 +528,14 @@ mod tests {
                 Declaration::Var(LetStmt {
                     lhs: String::from("foo"),
                     declared_type: VarType::Integer,
-                    rhs: Expression::UnaryExpr(String::from("67"), VarType::Integer),
+                    rhs: Expression::Literal(String::from("67"), VarType::Integer),
                 }),
                 Declaration::Func(FuncDecl {
                     name: String::from("main"),
                     field_list: Vec::new(),
                     body: BlockStmt {
                         inner: vec![Stmt::Return(ReturnStmt {
-                            expression: Expression::UnaryExpr(String::from("0"), VarType::Integer),
+                            expression: Expression::Literal(String::from("0"), VarType::Integer),
                             checked_expr_type: None,
                         })],
                     },
@@ -468,5 +544,77 @@ mod tests {
             ],
         };
         assert_eq!(expected, prog.unwrap());
+    }
+    #[test]
+    fn test_parse_prefix_expr() {
+        //Equivalent of:
+        // foo + !true;
+        let tokens = vec![
+            Token::Identifier(String::from("foo")),
+            Token::Op(Operator::Addition),
+            Token::Op(Operator::BoolNot),
+            Token::BoolLiteral(BoolLit::True),
+            Token::Semicolon,
+        ];
+        let mut iter = tokens.into_iter().peekable();
+        let recv = parse_expression(&mut iter, 0).unwrap();
+
+        let expected = Expression::BinaryExpr {
+            op: Operator::Addition,
+            lhs: Box::new(Expression::Var(String::from("foo"), VarType::Unknown)),
+            rhs: Box::new(Expression::UnaryExpr {
+                op: Operator::BoolNot,
+                operand: Box::new(Expression::Literal("true".to_string(), VarType::Bool)),
+            }),
+        };
+
+        assert_eq!(expected, recv);
+    }
+    #[test]
+    fn test_parse_if_stmt() {
+        //Equivalent of:
+        //if (z < 4){foo = 1 + 2;}
+        let tokens = vec![
+            Token::If,
+            Token::OpenParenthesis,
+            Token::Identifier(String::from("z")),
+            Token::Op(Operator::Less),
+            Token::IntegerLiteral(String::from("4")),
+            Token::CloseParenthesis,
+            Token::OpenBrace,
+            Token::Identifier(String::from("foo")),
+            Token::Op(Operator::Assignment),
+            Token::IntegerLiteral(String::from("1")),
+            Token::Op(Operator::Addition),
+            Token::IntegerLiteral(String::from("2")),
+            Token::Semicolon,
+            Token::CloseBrace,
+            Token::Eof,
+        ];
+        let body = BlockStmt {
+            inner: vec![Stmt::VarAssign(AssignStmt {
+                lhs: "foo".to_string(),
+                rhs: Expression::BinaryExpr {
+                    op: Operator::Addition,
+                    lhs: Box::new(Expression::Literal("1".to_string(), VarType::Integer)),
+                    rhs: Box::new(Expression::Literal("2".to_string(), VarType::Integer)),
+                },
+                checked_expr_type: None,
+            })],
+        };
+        let condition = Expression::BinaryExpr {
+            op: Operator::Less,
+            lhs: Box::new(Expression::Var("z".into(), VarType::Unknown)),
+            rhs: Box::new(Expression::Literal("4".to_string(), VarType::Integer)),
+        };
+        let expected = IfStmt {
+            body,
+            condition,
+            else_stmt: None,
+        };
+        let mut iter = tokens.into_iter().peekable();
+        let if_stmt = parse_if_stmt(&mut iter);
+
+        assert_eq!(expected, if_stmt.unwrap());
     }
 }

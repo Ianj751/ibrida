@@ -17,7 +17,8 @@ pub enum VarType {
     Unknown,
     Float,
     Integer,
-    String,
+
+    Bool,
 }
 impl Display for VarType {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -25,7 +26,8 @@ impl Display for VarType {
             VarType::Unknown => String::from("Unknown"),
             VarType::Float => String::from("f32"),
             VarType::Integer => String::from("i32"),
-            VarType::String => String::from("string"),
+
+            VarType::Bool => String::from("bool"),
         };
         write!(f, "{}", name)
     }
@@ -68,6 +70,8 @@ pub enum Stmt {
     Return(ReturnStmt),
     VarDecl(LetStmt),
     VarAssign(AssignStmt),
+    IfStmt(IfStmt),
+    Else(ElseStmt),
 }
 #[derive(Debug, PartialEq, Eq)]
 pub struct ReturnStmt {
@@ -79,8 +83,18 @@ pub struct ReturnStmt {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Expression {
     //the vartype here is for the checked type of the literal / id
-    UnaryExpr(String, VarType),            //leaf
-    BinaryExpr(Operator, Vec<Expression>), //parent, [lhs, rhs]
+    Literal(String, VarType), //leaf
+    UnaryExpr {
+        op: Operator,
+        operand: Box<Expression>,
+    }, //leaf
+    Var(String, VarType),
+    //FuncCall(String, VarType),
+    BinaryExpr {
+        op: Operator,
+        lhs: Box<Expression>,
+        rhs: Box<Expression>,
+    }, //parent, [lhs, rhs]
 }
 
 //let foo: i32 = 69;
@@ -99,4 +113,25 @@ pub struct AssignStmt {
     pub lhs: String,
     pub rhs: Expression,
     pub checked_expr_type: Option<VarType>,
+}
+
+// foo(a + b, c);
+pub struct FunctionCall {
+    func_id: String,
+    fields: Vec<Expression>,
+}
+// if (foo == 2){
+//  bar = 3;
+//}
+#[derive(Debug, PartialEq, Eq)]
+pub struct IfStmt {
+    pub body: BlockStmt,
+    pub condition: Expression,
+    pub else_stmt: Option<ElseStmt>,
+}
+// else{ bar = 2; }
+// Maybe no need for elif. A nested else and if does the trick
+#[derive(Debug, PartialEq, Eq)]
+pub struct ElseStmt {
+    pub body: BlockStmt,
 }
