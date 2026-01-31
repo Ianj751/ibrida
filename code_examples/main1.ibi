@@ -1,36 +1,40 @@
-func add(x: i32, y: i32): i32 {
-    return x + y;
+func is_passing_grade(score: f32): bool {
+    if (score >= 60.0) {
+        return true;
+    } else {
+        return false;
+    }
 }
 
-func subtract(x: i32, y: i32): i32 {
-    return x - y;
-}
-
-func multiply(a: i32, b: i32): i32 {
-    let result: i32 = a * b;
-    return result;
+func calculate_average(a: f32, b: f32, c: f32): f32 {
+    let sum: f32 = a + b + c;
+    let average: f32 = sum / 3.0;
+    return average;
 }
 
 func main(): i32 {
-    let foo: i32 = 69 + 420 * 4 + 3;
-    let bar: i32 = 100 - 25;
-    let baz: i32 = foo + bar;
-
-    let x: i32 = 10;
-    let y: i32 = 20;
-    let z: i32 = x * y + 5;
-
-    if (z > 100) {
-        z = z - 50;
+    let test1: f32 = 85.5;
+    let test2: f32 = 92.0;
+    let test3: f32 = 78.25;
+    
+    let avg: f32 = calculate_average(test1, test2, test3);
+    
+    let passed: bool = is_passing_grade(avg);
+    
+    let bonus_points: i32 = 10;
+    let base_score: i32 = 50;
+    
+    if (passed) {
+        base_score = base_score + bonus_points;
     } else {
-        z = z + 50;
+        base_score = base_score - 5;
     }
-
-    let final: i32 = baz - z + 42;
-
-    if (final > 1000) {
-        return final * 2;
-    } else {
-        return final;
+    
+    let has_extra_credit: bool = true;
+    
+    if (has_extra_credit) {
+        base_score = base_score + 15;
     }
+    
+    return base_score;
 }

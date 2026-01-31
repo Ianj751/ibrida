@@ -1,11 +1,11 @@
-use std::{collections::HashMap, fmt::format};
+use std::{collections::HashMap, io::IntoInnerError};
 
 use thiserror::Error;
 
 use crate::{
     ast::{
-        self, AssignStmt, BlockStmt, Declaration, ElseStmt, Expression, Field, FuncDecl, IfStmt,
-        LetStmt, Program, ReturnStmt, Stmt, VarType,
+        AssignStmt, BlockStmt, Declaration, ElseStmt, Expression, Field, FuncCall, FuncDecl,
+        IfStmt, LetStmt, Program, ReturnStmt, Stmt, VarType,
     },
     tokenizer::Operator,
 };
@@ -131,6 +131,112 @@ impl SAVisitor {
             func_ret_stack: Vec::new(),
         }
     }
+    pub fn typecheck_expr(&mut self, expr: &mut Expression) -> Result<VarType, SemanticError> {
+        match expr {
+            Expression::BinaryExpr { op, lhs, rhs } => {
+                let mut children = [(lhs, VarType::Unknown), (rhs, VarType::Unknown)];
+
+                for child in children.iter_mut() {
+                    let ty = self.typecheck_expr(child.0)?;
+                    assert!(ty != VarType::Unknown); //would be dumb if it was unknown
+                    child.1 = ty;
+                }
+
+                if op.is_arithmetic() {
+                    //theres gotta be a cleaner way to do this
+                    if children[0].1 == children[1].1 {
+                        return Ok(children[0].1.clone());
+                    }
+
+                    let has_float = children
+                        .iter()
+                        .any(|(_, var_type)| *var_type == VarType::Float);
+                    let has_integer = children
+                        .iter()
+                        .any(|(_, var_type)| *var_type == VarType::Integer);
+                    let has_bool = children
+                        .iter()
+                        .any(|(_, var_type)| *var_type == VarType::Bool);
+
+                    if has_float && (has_integer || has_bool) {
+                        Ok(VarType::Float)
+                    } else if has_bool && has_integer {
+                        Ok(VarType::Integer)
+                    } else {
+                        Err(SemanticError::InvalidOperands(op.clone()))
+                    }
+                } else if op.is_comparison() {
+                    //FIXME: Need this cond to match only ones that can compare 2 generic objects
+                    if children[0].1 == children[1].1 {
+                        Ok(VarType::Bool)
+                    } else {
+                        Err(SemanticError::InvalidOperands(op.clone()))
+                    }
+                } else if op.is_boolean() {
+                    //FIXME: Need this cond to match only ones that can compare 2 booleans
+                    if (children[0].1 == children[1].1) && children[0].1 == VarType::Bool {
+                        Ok(VarType::Bool)
+                    } else {
+                        Err(SemanticError::InvalidOperands(op.clone()))
+                    }
+                } else {
+                    Err(SemanticError::CustomError(format!(
+                        "can not typecheck with given operator {:?}",
+                        op.clone()
+                    )))
+                }
+            }
+            Expression::Literal(id, ty) | Expression::Var(id, ty) => match ty {
+                VarType::Unknown => match self.sem_context.lookup_symbol(id) {
+                    Some(s) => {
+                        //functions are represented in the symbol table as "func: <return_type>"
+                        if s.symbol_type.ends_with("f32") {
+                            *ty = VarType::Float;
+                            Ok(VarType::Float)
+                        } else if s.symbol_type.ends_with("i32") {
+                            *ty = VarType::Integer;
+                            Ok(VarType::Integer)
+                        } else if s.symbol_type.ends_with("bool") {
+                            *ty = VarType::Bool;
+                            Ok(VarType::Bool)
+                        } else {
+                            Err(SemanticError::UnexpectedValue(s.symbol_type.clone())) //more of a programmer error ig
+                        }
+                    }
+                    None => Err(SemanticError::InvalidSymbolReference(id.clone())),
+                },
+                t => Ok(t.clone()),
+            },
+            Expression::UnaryExpr { op, operand } => {
+                //check that operator can be applied to operand / if can exist in a UnaryExpr
+                // get the overall type of the expression
+                // Not is the only unary expr atm
+                match op {
+                    Operator::BoolNot => {
+                        let ty = self.typecheck_expr(operand)?;
+                        if ty != VarType::Bool {
+                            Err(SemanticError::InvalidOperands(Operator::BoolNot))
+                        } else {
+                            Ok(VarType::Bool)
+                        }
+                    }
+                    _ => Err(SemanticError::CustomError(String::from(
+                        "Invalid Unary Expression Operator",
+                    ))),
+                }
+            }
+            Expression::FuncCall(fn_call) => {
+                self.visit(fn_call)?;
+                let ty = fn_call
+                    .return_type
+                    .as_ref()
+                    .expect("visit should have embedded type on function call")
+                    .clone();
+
+                Ok(ty)
+            }
+        }
+    }
 }
 type SAResult = Result<(), SemanticError>;
 pub trait Visit<T, U> {
@@ -156,7 +262,18 @@ impl Visit<FuncDecl, SemanticError> for SAVisitor {
     fn visit(&mut self, visitable: &mut FuncDecl) -> SAResult {
         self.func_ret_stack.push(visitable.decl_return_type.clone());
 
-        let func_type = format!("func: {}", visitable.decl_return_type);
+        let field_types: String = visitable
+            .field_list
+            .iter()
+            .map(|p| p.field_type.to_string() + " ")
+            .collect();
+
+        //func add(x: i32, y: i32): i32 => func(i32, i32): i32
+        let func_type = format!(
+            "func({}): {}",
+            field_types.trim(),
+            visitable.decl_return_type
+        );
         self.sem_context
             .add_symbol(&visitable.name, func_type, true);
 
@@ -172,6 +289,7 @@ impl Visit<FuncDecl, SemanticError> for SAVisitor {
 impl Visit<Vec<Field>, SemanticError> for SAVisitor {
     fn visit(&mut self, visitable: &mut Vec<Field>) -> SAResult {
         for param in visitable {
+            //need to add param types to fn entry in symbol tbl
             self.sem_context
                 .add_symbol(&param.name, param.field_type.to_string(), false);
         }
@@ -187,6 +305,7 @@ impl Visit<BlockStmt, SemanticError> for SAVisitor {
                 Stmt::VarDecl(let_stmt) => self.visit(let_stmt),
                 Stmt::IfStmt(if_stmt) => self.visit(if_stmt),
                 Stmt::Else(else_stmt) => self.visit(else_stmt),
+                Stmt::FnCall(func_stmt) => self.visit(func_stmt),
             }?;
         }
 
@@ -195,22 +314,24 @@ impl Visit<BlockStmt, SemanticError> for SAVisitor {
 }
 impl Visit<AssignStmt, SemanticError> for SAVisitor {
     fn visit(&mut self, visitable: &mut AssignStmt) -> SAResult {
-        let sym = self.sem_context.lookup_symbol(&visitable.lhs);
-        let ty = match sym {
-            Some(s) => {
-                if s.is_const {
-                    return Err(SemanticError::InvalidAssignment(visitable.lhs.clone()));
+        let ty = {
+            let sym = self.sem_context.lookup_symbol(&visitable.lhs);
+            match sym {
+                Some(s) => {
+                    if s.is_const {
+                        return Err(SemanticError::InvalidAssignment(visitable.lhs.clone()));
+                    }
+                    s.symbol_type.clone()
                 }
-                &s.symbol_type
+                None => return Err(SemanticError::InvalidSymbolReference(visitable.lhs.clone())),
             }
-            None => return Err(SemanticError::InvalidSymbolReference(visitable.lhs.clone())),
         };
 
-        let expr_ty = typecheck_expr(&mut visitable.rhs, &self.sem_context)?;
-        if expr_ty.to_string() != *ty {
+        let expr_ty = self.typecheck_expr(&mut visitable.rhs)?;
+        if expr_ty.to_string() != ty {
             return Err(SemanticError::MismatchedTypes {
                 found: expr_ty.to_string(),
-                expected: ty.clone(),
+                expected: ty,
             });
         }
 
@@ -226,7 +347,7 @@ impl Visit<LetStmt, SemanticError> for SAVisitor {
 
         self.sem_context
             .add_symbol(&visitable.lhs, visitable.declared_type.to_string(), false);
-        let expr_ty = typecheck_expr(&mut visitable.rhs, &self.sem_context)?;
+        let expr_ty = self.typecheck_expr(&mut visitable.rhs)?;
 
         if visitable.declared_type != expr_ty {
             return Err(SemanticError::MismatchedTypes {
@@ -248,9 +369,9 @@ impl Visit<ReturnStmt, SemanticError> for SAVisitor {
             });
         }
 
-        let last = last.unwrap();
-        let expr_ty = typecheck_expr(&mut visitable.expression, &self.sem_context)?;
-        if *last != expr_ty {
+        let last = last.unwrap().clone();
+        let expr_ty = self.typecheck_expr(&mut visitable.expression)?;
+        if last != expr_ty {
             return Err(SemanticError::InvalidFunctionReturn {
                 expected: last.to_string(),
                 found: expr_ty.to_string(),
@@ -262,7 +383,7 @@ impl Visit<ReturnStmt, SemanticError> for SAVisitor {
 }
 impl Visit<IfStmt, SemanticError> for SAVisitor {
     fn visit(&mut self, visitable: &mut IfStmt) -> Result<(), SemanticError> {
-        let expr_ty = typecheck_expr(&mut visitable.condition, &self.sem_context)?;
+        let expr_ty = self.typecheck_expr(&mut visitable.condition)?;
         if expr_ty != VarType::Bool {
             return Err(SemanticError::MismatchedTypes {
                 expected: VarType::Bool.to_string(),
@@ -287,100 +408,40 @@ impl Visit<ElseStmt, SemanticError> for SAVisitor {
     }
 }
 
-// returns the overall type of the expression and embeds types on the Expression tree
-fn typecheck_expr(expr: &mut Expression, sem_ctx: &SemContext) -> Result<VarType, SemanticError> {
-    match expr {
-        Expression::BinaryExpr { op, lhs, rhs } => {
-            let mut children = [(lhs, VarType::Unknown), (rhs, VarType::Unknown)];
-
-            for child in children.iter_mut() {
-                let ty = typecheck_expr(child.0, sem_ctx)?;
-                assert!(ty != VarType::Unknown); //would be dumb if it was unknown
-                child.1 = ty;
+impl Visit<FuncCall, SemanticError> for SAVisitor {
+    fn visit(&mut self, visitable: &mut FuncCall) -> Result<(), SemanticError> {
+        let sym_type = match self.sem_context.lookup_symbol(&visitable.id) {
+            Some(s) => s.symbol_type.clone(),
+            None => {
+                return Err(SemanticError::InvalidSymbolReference(visitable.id.clone()));
             }
-
-            if op.is_arithmetic() {
-                //theres gotta be a cleaner way to do this
-                if children[0].1 == children[1].1 {
-                    return Ok(children[0].1.clone());
-                }
-
-                let has_float = children
-                    .iter()
-                    .any(|(_, var_type)| *var_type == VarType::Float);
-                let has_integer = children
-                    .iter()
-                    .any(|(_, var_type)| *var_type == VarType::Integer);
-                let has_bool = children
-                    .iter()
-                    .any(|(_, var_type)| *var_type == VarType::Bool);
-
-                if has_float && (has_integer || has_bool) {
-                    Ok(VarType::Float)
-                } else if has_bool && has_integer {
-                    Ok(VarType::Integer)
-                } else {
-                    Err(SemanticError::InvalidOperands(op.clone()))
-                }
-            } else if op.is_comparison() {
-                //FIXME: Need this cond to match only ones that can compare 2 generic objects
-                if children[0].1 == children[1].1 {
-                    Ok(VarType::Bool)
-                } else {
-                    Err(SemanticError::InvalidOperands(op.clone()))
-                }
-            } else if op.is_boolean() {
-                //FIXME: Need this cond to match only ones that can compare 2 booleans
-                if (children[0].1 == children[1].1) && children[0].1 == VarType::Bool {
-                    Ok(VarType::Bool)
-                } else {
-                    Err(SemanticError::InvalidOperands(op.clone()))
-                }
-            } else {
-                Err(SemanticError::CustomError(format!(
-                    "can not typecheck with given operator {:?}",
-                    op.clone()
-                )))
-            }
+        };
+        let mut arguments: String = String::new();
+        for p in &mut visitable.args {
+            let ty = self.typecheck_expr(p)?;
+            arguments.push_str(&(ty.to_string() + " "));
         }
-        Expression::Literal(id, ty) | Expression::Var(id, ty) => match ty {
-            VarType::Unknown => match sem_ctx.lookup_symbol(id) {
-                Some(s) => {
-                    //functions are represented in the symbol table as "func: <return_type>"
-                    if s.symbol_type.ends_with("f32") {
-                        *ty = VarType::Float;
-                        Ok(VarType::Float)
-                    } else if s.symbol_type.ends_with("i32") {
-                        *ty = VarType::Integer;
-                        Ok(VarType::Integer)
-                    } else {
-                        Err(SemanticError::UnexpectedValue(s.symbol_type.clone())) //more of a programmer error ig
-                    }
-                }
-                None => Err(SemanticError::InvalidSymbolReference(id.clone())),
-            },
-            t => Ok(t.clone()),
-        },
-        Expression::UnaryExpr { op, operand } => {
-            //check that operator can be applied to operand / if can exist in a UnaryExpr
-            // get the overall type of the expression
-            // Not is the only unary expr atm
-            match op {
-                Operator::BoolNot => {
-                    let ty = typecheck_expr(operand, sem_ctx)?;
-                    if ty != VarType::Bool {
-                        Err(SemanticError::InvalidOperands(Operator::BoolNot))
-                    } else {
-                        Ok(VarType::Bool)
-                    }
-                }
-                _ => Err(SemanticError::CustomError(String::from(
-                    "Invalid Unary Expression Operator",
-                ))),
-            }
+
+        let recv_sym_ty = format!("func({}):", arguments.trim());
+        if !sym_type.starts_with(&recv_sym_ty) {
+            return Err(SemanticError::MismatchedTypes {
+                expected: sym_type.clone(),
+                found: recv_sym_ty,
+            });
         }
+
+        let ty = match &sym_type {
+            s if s.ends_with("i32") => VarType::Integer,
+            s if s.ends_with("f32") => VarType::Float,
+            s if s.ends_with("bool") => VarType::Bool,
+            t => panic!("visit<FuncCall>: invalid type found in symbol table: {t}"),
+        };
+        visitable.return_type = Some(ty);
+        Ok(())
     }
 }
+
+// returns the overall type of the expression and embeds types on the Expression tree
 
 #[cfg(test)]
 mod tests {
@@ -394,8 +455,8 @@ mod tests {
             lhs: Box::new(Expression::Literal(String::from("1"), VarType::Integer)),
             rhs: Box::new(Expression::Literal(String::from("2.1"), VarType::Float)),
         };
-        let sem_ctx = SemContext::new();
-        let got = typecheck_expr(&mut expr, &sem_ctx);
+        let mut v = SAVisitor::new();
+        let got = v.typecheck_expr(&mut expr);
         assert!(got.is_ok());
 
         assert_eq!(got.unwrap(), VarType::Float);
@@ -408,10 +469,10 @@ mod tests {
             lhs: Box::new(Expression::Literal(String::from("1"), VarType::Integer)),
             rhs: Box::new(Expression::Var(String::from("foo"), VarType::Unknown)),
         };
-        let mut sem_ctx = SemContext::new();
-        sem_ctx.add_symbol("foo", String::from("f32"), false);
+        let mut v = SAVisitor::new();
+        v.sem_context.add_symbol("foo", String::from("f32"), false);
 
-        let got = typecheck_expr(&mut expr, &sem_ctx);
+        let got = v.typecheck_expr(&mut expr);
         assert!(got.is_ok());
 
         match expr {

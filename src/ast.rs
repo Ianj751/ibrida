@@ -2,15 +2,6 @@ use std::fmt::{self, Display, Formatter};
 
 use crate::tokenizer::Operator;
 
-pub enum AstNode {
-    File(Program),
-    FunctionDecl(FuncDecl),
-    FunctionParams(Vec<Field>),
-    BlockStmt(BlockStmt),
-    VariableDecl(LetStmt),
-    VariableAssign(AssignStmt),
-    Expr(Expression),
-}
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub enum VarType {
     #[default]
@@ -72,6 +63,7 @@ pub enum Stmt {
     VarAssign(AssignStmt),
     IfStmt(IfStmt),
     Else(ElseStmt),
+    FnCall(FuncCall),
 }
 #[derive(Debug, PartialEq, Eq)]
 pub struct ReturnStmt {
@@ -95,6 +87,7 @@ pub enum Expression {
         lhs: Box<Expression>,
         rhs: Box<Expression>,
     }, //parent, [lhs, rhs]
+    FuncCall(FuncCall),
 }
 
 //let foo: i32 = 69;
@@ -134,4 +127,12 @@ pub struct IfStmt {
 #[derive(Debug, PartialEq, Eq)]
 pub struct ElseStmt {
     pub body: BlockStmt,
+}
+
+// foo(a, 1, a+b);
+#[derive(Debug, PartialEq, Eq)]
+pub struct FuncCall {
+    pub id: String,
+    pub args: Vec<Expression>,
+    pub return_type: Option<VarType>,
 }

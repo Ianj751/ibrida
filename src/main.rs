@@ -31,6 +31,10 @@ fn main() {
     let mut file_ast = parse_program(&mut iter).unwrap();
 
     let mut sem_analyzer = SAVisitor::new();
-    sem_analyzer.visit(&mut file_ast).unwrap();
+    if let Err(e) = sem_analyzer.visit(&mut file_ast) {
+        eprintln!("joe mammaaaa:\n {e}");
+        return;
+    }
+
     dbg!(file_ast);
 }
