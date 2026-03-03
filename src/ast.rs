@@ -72,6 +72,8 @@ pub struct ReturnStmt {
 }
 
 // 1 - 2 + 3 * 5;
+//Feeling kinda lazy atm and dont feel like refactoring tests and the semanalyzer and the parser and codegen
+//but each of these exprs should have type info embedded on them with VarType::Unknown for CodeGen
 #[derive(Debug, PartialEq, Eq)]
 pub enum Expression {
     //the vartype here is for the checked type of the literal / id
@@ -79,15 +81,17 @@ pub enum Expression {
     UnaryExpr {
         op: Operator,
         operand: Box<Expression>,
+        ty: VarType,
     }, //leaf
     Var(String, VarType),
-    //FuncCall(String, VarType),
+
     BinaryExpr {
         op: Operator,
         lhs: Box<Expression>,
         rhs: Box<Expression>,
+        ty: VarType,
     }, //parent, [lhs, rhs]
-    FuncCall(FuncCall),
+    FuncCall(FuncCall, VarType),
 }
 
 //let foo: i32 = 69;

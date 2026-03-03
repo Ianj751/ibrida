@@ -13,4 +13,4 @@ manner.
 - At the moment I plan to avoid:
     - Implementing my own optimizations
     - Emitting ASM
-    
+-

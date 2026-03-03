@@ -17,7 +17,7 @@ func main(): i32 {
     let test2: f32 = 92.0;
     let test3: f32 = 78.25;
     
-    let avg: f32 = calculate_average(test1, test2, test3);
+    let avg: i32 = calculate_average(test1, test2, test3);
     
     let passed: bool = is_passing_grade(avg);
     

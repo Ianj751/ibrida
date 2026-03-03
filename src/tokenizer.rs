@@ -86,6 +86,12 @@ impl Operator {
             | Operator::LessEq
             | Operator::NotEq)
     }
+    pub fn is_binary(&self) -> bool {
+        !self.is_unary()
+    }
+    pub fn is_unary(&self) -> bool {
+        matches!(self, Operator::BoolNot)
+    }
 }
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum BoolLit {

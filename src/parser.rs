@@ -63,7 +63,7 @@ fn parse_expression(
                 && *t == Token::OpenParenthesis
             {
                 let fn_call = parse_fn_call(iter, id)?;
-                Expression::FuncCall(fn_call)
+                Expression::FuncCall(fn_call, VarType::Unknown)
             } else {
                 Expression::Var(id, VarType::Unknown)
             }
@@ -79,6 +79,7 @@ fn parse_expression(
             Expression::UnaryExpr {
                 op,
                 operand: Box::new(rhs),
+                ty: VarType::Unknown,
             }
         }
         Some(t) => {
@@ -88,7 +89,7 @@ fn parse_expression(
             });
         }
         None => {
-            return Err(ParseError::CustomError(format!("uhhh here?")));
+            return Err(ParseError::UnexpectedEnd);
         }
     };
 
@@ -119,6 +120,7 @@ fn parse_expression(
             op,
             lhs: Box::new(lhs),
             rhs: Box::new(rhs),
+            ty: VarType::Unknown,
         }
     }
     Ok(lhs)
@@ -416,7 +418,9 @@ mod tests {
 
                 lhs: Box::new(Expression::Literal(String::from("2"), VarType::Integer)),
                 rhs: Box::new(Expression::Literal(String::from("3.1"), VarType::Float)),
+                ty: VarType::Unknown,
             }),
+            ty: VarType::Unknown,
         };
 
         assert_eq!(expr.unwrap(), expected);
@@ -444,8 +448,10 @@ mod tests {
                 op: Operator::Addition,
                 lhs: Box::new(Expression::Literal("1".into(), VarType::Integer)),
                 rhs: Box::new(Expression::Literal("2".into(), VarType::Integer)),
+                ty: VarType::Unknown,
             }),
             rhs: Box::new(Expression::Literal("3.1".into(), VarType::Float)),
+            ty: VarType::Unknown,
         };
 
         assert_eq!(expected, received.unwrap());
@@ -470,6 +476,7 @@ mod tests {
                 op: Operator::Addition,
                 lhs: Box::new(Expression::Literal(String::from("1.2"), VarType::Float)),
                 rhs: Box::new(Expression::Var(String::from("foo"), VarType::Unknown)),
+                ty: VarType::Unknown,
             },
             checked_expr_type: None,
         };
@@ -503,6 +510,7 @@ mod tests {
 
                 lhs: Box::new(Expression::Literal(String::from("1"), VarType::Integer)),
                 rhs: Box::new(Expression::Var(String::from("bar"), VarType::Unknown)),
+                ty: VarType::Unknown,
             },
         };
 
@@ -543,6 +551,7 @@ mod tests {
                     op: Operator::Addition,
                     lhs: Box::new(Expression::Var(String::from("a"), VarType::Unknown)),
                     rhs: Box::new(Expression::Var(String::from("b"), VarType::Unknown)),
+                    ty: VarType::Unknown,
                 },
                 checked_expr_type: None,
             })],
@@ -654,7 +663,9 @@ mod tests {
             rhs: Box::new(Expression::UnaryExpr {
                 op: Operator::BoolNot,
                 operand: Box::new(Expression::Literal("true".to_string(), VarType::Bool)),
+                ty: VarType::Unknown,
             }),
+            ty: VarType::Unknown,
         };
 
         assert_eq!(expected, recv);
@@ -686,6 +697,7 @@ mod tests {
                     op: Operator::Addition,
                     lhs: Box::new(Expression::Literal("1".to_string(), VarType::Integer)),
                     rhs: Box::new(Expression::Literal("2".to_string(), VarType::Integer)),
+                    ty: VarType::Unknown,
                 },
                 checked_expr_type: None,
             })],
@@ -694,6 +706,7 @@ mod tests {
             op: Operator::Less,
             lhs: Box::new(Expression::Var("z".into(), VarType::Unknown)),
             rhs: Box::new(Expression::Literal("4".to_string(), VarType::Integer)),
+            ty: VarType::Unknown,
         };
         let expected = IfStmt {
             body,
@@ -751,6 +764,7 @@ mod tests {
                     op: Operator::Addition,
                     lhs: Box::new(Expression::Var("a".into(), VarType::Unknown)),
                     rhs: Box::new(Expression::Var("b".into(), VarType::Unknown)),
+                    ty: VarType::Unknown,
                 },
                 Expression::Literal("false".into(), VarType::Bool),
             ],

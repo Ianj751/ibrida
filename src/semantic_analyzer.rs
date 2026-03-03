@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::IntoInnerError};
+use std::collections::HashMap;
 
 use thiserror::Error;
 
@@ -29,7 +29,7 @@ pub enum SemanticError {
     )]
     InvalidFunctionReturn { expected: String, found: String },
     #[error("{0}")]
-    CustomError(String),
+    CustomError(String), //for those errors ill probably never use again
 }
 
 #[derive(Debug, Clone)]
@@ -133,7 +133,12 @@ impl SAVisitor {
     }
     pub fn typecheck_expr(&mut self, expr: &mut Expression) -> Result<VarType, SemanticError> {
         match expr {
-            Expression::BinaryExpr { op, lhs, rhs } => {
+            Expression::BinaryExpr {
+                op,
+                lhs,
+                rhs,
+                ty: expr_ty,
+            } => {
                 let mut children = [(lhs, VarType::Unknown), (rhs, VarType::Unknown)];
 
                 for child in children.iter_mut() {
@@ -144,30 +149,26 @@ impl SAVisitor {
 
                 if op.is_arithmetic() {
                     //theres gotta be a cleaner way to do this
-                    if children[0].1 == children[1].1 {
-                        return Ok(children[0].1.clone());
-                    }
-
-                    let has_float = children
-                        .iter()
-                        .any(|(_, var_type)| *var_type == VarType::Float);
-                    let has_integer = children
-                        .iter()
-                        .any(|(_, var_type)| *var_type == VarType::Integer);
+                    //boolean arithmetic makes life slightly harder for codegen
                     let has_bool = children
                         .iter()
                         .any(|(_, var_type)| *var_type == VarType::Bool);
+                    if has_bool {
+                        return Err(SemanticError::InvalidOperands(op.clone()));
+                    }
 
-                    if has_float && (has_integer || has_bool) {
-                        Ok(VarType::Float)
-                    } else if has_bool && has_integer {
-                        Ok(VarType::Integer)
+                    //no implicit conversions btwn data types
+                    //this also means float <op> int != float
+                    if children[0].1 == children[1].1 {
+                        *expr_ty = children[0].1.clone();
+                        Ok(children[0].1.clone())
                     } else {
                         Err(SemanticError::InvalidOperands(op.clone()))
                     }
-                } else if op.is_comparison() {
+                } else if op.is_comparison() && op.is_binary() {
                     //FIXME: Need this cond to match only ones that can compare 2 generic objects
                     if children[0].1 == children[1].1 {
+                        *expr_ty = VarType::Bool;
                         Ok(VarType::Bool)
                     } else {
                         Err(SemanticError::InvalidOperands(op.clone()))
@@ -175,6 +176,7 @@ impl SAVisitor {
                 } else if op.is_boolean() {
                     //FIXME: Need this cond to match only ones that can compare 2 booleans
                     if (children[0].1 == children[1].1) && children[0].1 == VarType::Bool {
+                        *expr_ty = VarType::Bool;
                         Ok(VarType::Bool)
                     } else {
                         Err(SemanticError::InvalidOperands(op.clone()))
@@ -207,7 +209,11 @@ impl SAVisitor {
                 },
                 t => Ok(t.clone()),
             },
-            Expression::UnaryExpr { op, operand } => {
+            Expression::UnaryExpr {
+                op,
+                operand,
+                ty: expr_ty,
+            } => {
                 //check that operator can be applied to operand / if can exist in a UnaryExpr
                 // get the overall type of the expression
                 // Not is the only unary expr atm
@@ -217,6 +223,7 @@ impl SAVisitor {
                         if ty != VarType::Bool {
                             Err(SemanticError::InvalidOperands(Operator::BoolNot))
                         } else {
+                            *expr_ty = VarType::Bool;
                             Ok(VarType::Bool)
                         }
                     }
@@ -225,13 +232,14 @@ impl SAVisitor {
                     ))),
                 }
             }
-            Expression::FuncCall(fn_call) => {
+            Expression::FuncCall(fn_call, fn_ty) => {
                 self.visit(fn_call)?;
                 let ty = fn_call
                     .return_type
                     .as_ref()
                     .expect("visit should have embedded type on function call")
                     .clone();
+                *fn_ty = ty.clone();
 
                 Ok(ty)
             }
@@ -261,6 +269,11 @@ impl Visit<Declaration, SemanticError> for SAVisitor {
 impl Visit<FuncDecl, SemanticError> for SAVisitor {
     fn visit(&mut self, visitable: &mut FuncDecl) -> SAResult {
         self.func_ret_stack.push(visitable.decl_return_type.clone());
+        if visitable.name == "main" && !visitable.field_list.is_empty() {
+            return Err(SemanticError::CustomError(
+                "the main function may not have parameters".into(),
+            ));
+        }
 
         let field_types: String = visitable
             .field_list
@@ -454,10 +467,22 @@ mod tests {
             op: Operator::Addition,
             lhs: Box::new(Expression::Literal(String::from("1"), VarType::Integer)),
             rhs: Box::new(Expression::Literal(String::from("2.1"), VarType::Float)),
+            ty: VarType::Unknown,
         };
         let mut v = SAVisitor::new();
         let got = v.typecheck_expr(&mut expr);
         assert!(got.is_ok());
+        match expr {
+            Expression::BinaryExpr {
+                op: _,
+                lhs: _,
+                rhs: _,
+                ty,
+            } => {
+                assert_eq!(ty, VarType::Float)
+            }
+            t => panic!("expected binary expr, got {t:?}"),
+        }
 
         assert_eq!(got.unwrap(), VarType::Float);
     }
@@ -468,6 +493,7 @@ mod tests {
 
             lhs: Box::new(Expression::Literal(String::from("1"), VarType::Integer)),
             rhs: Box::new(Expression::Var(String::from("foo"), VarType::Unknown)),
+            ty: VarType::Unknown,
         };
         let mut v = SAVisitor::new();
         v.sem_context.add_symbol("foo", String::from("f32"), false);
@@ -476,10 +502,18 @@ mod tests {
         assert!(got.is_ok());
 
         match expr {
-            Expression::BinaryExpr { op: _, lhs: _, rhs } => match rhs.as_ref() {
-                Expression::Var(_, ty) => assert_eq!(*ty, VarType::Float),
-                _ => panic!("How did we even get here? Expected UnaryExpr at index 1"),
-            },
+            Expression::BinaryExpr {
+                op: _,
+                lhs: _,
+                rhs,
+                ty: expr_ty,
+            } => {
+                assert_eq!(expr_ty, VarType::Float);
+                match rhs.as_ref() {
+                    Expression::Var(_, ty) => assert_eq!(*ty, VarType::Float),
+                    _ => panic!("How did we even get here? Expected UnaryExpr at index 1"),
+                }
+            }
             _ => panic!("How did we even get here? Expected BinaryExpr but got Unary"),
         }
 
@@ -499,8 +533,8 @@ mod tests {
             }
         */
         let mut sem_ctx = SemContext::new();
-        sem_ctx.add_symbol("add", String::from("func: i32"), true);
-        sem_ctx.add_symbol("main", String::from("func: i32"), true);
+        sem_ctx.add_symbol("add", String::from("func(): i32"), true);
+        sem_ctx.add_symbol("main", String::from("func(): i32"), true);
         sem_ctx.enter_scope();
         sem_ctx.add_symbol("a", String::from("i32"), false);
         sem_ctx.enter_scope();
