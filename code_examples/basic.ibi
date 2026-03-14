@@ -2,10 +2,11 @@ func add(a: i32, b: i32): i32{return a + b;}
 
 func main(): i32{
 
-  let a: i32 = 9;
+let a: i32 = 9;
+a = 5;
 
-  let b: i32 = 10;
+let b: i32 = 10;
 
-  return add(a, b);
+return add(a, b);
 
 }

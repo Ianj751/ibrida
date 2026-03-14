@@ -9,13 +9,12 @@ use inkwell::{
     targets::{Target, TargetMachine},
     types::BasicType,
     values::{
-        BasicMetadataValueEnum, BasicValue, FloatValue, FunctionValue, GlobalValue, IntValue,
-        PointerValue,
+        BasicMetadataValueEnum, BasicValue, FunctionValue, GlobalValue, IntValue, PointerValue,
     },
 };
 
 use crate::{
-    ast::{Declaration, Expression, FuncDecl, LetStmt, Program, Stmt, VarType},
+    ast::{Declaration, Expression, FuncDecl, IfStmt, LetStmt, Program, Stmt, VarType},
     tokenizer::Operator,
 };
 
@@ -75,7 +74,7 @@ impl<'ctx> CodeGen<'ctx> {
     }
     //taking ownership of AST b/c assuming no more use for it
     //should definitely simplify ownership
-    pub fn compile_program(&mut self, program: Program, show_llvm: bool) {
+    pub fn compile_program(&mut self, program: Program, show_llvm: bool, show_asm: bool) {
         Target::initialize_native(&Default::default()).expect("failed to initialize native target");
         for decl in program.declarations {
             match decl {
@@ -126,6 +125,15 @@ impl<'ctx> CodeGen<'ctx> {
             )
             .expect("failed to build target machine");
 
+        if show_asm {
+            target_machine
+                .write_to_file(
+                    &self.module,
+                    inkwell::targets::FileType::Assembly,
+                    Path::new("ibrida.s"),
+                )
+                .expect("failed to write assembly file");
+        }
         let output_path = Path::new("ibrida.o");
         target_machine
             .write_to_file(
@@ -167,7 +175,6 @@ impl<'ctx> CodeGen<'ctx> {
             last_val = self.compile_stmt(s);
         }
 
-        // Add return if needed
         if self
             .builder
             .get_insert_block()
@@ -196,9 +203,22 @@ impl<'ctx> CodeGen<'ctx> {
                 Some(return_val)
             }
             Stmt::VarDecl(let_stmt) => Some(self.compile_vardecl(let_stmt)),
-            Stmt::VarAssign(assign_stmt) => todo!(),
-            Stmt::IfStmt(if_stmt) => todo!(),
-            Stmt::Else(else_stmt) => todo!(),
+            Stmt::VarAssign(assign_stmt) => {
+                let rhs_val = self.compile_expr_int(&assign_stmt.rhs);
+                // let ty = self.llvm_type(assign_stmt.checked_expr_type.as_ref().unwrap());
+
+                let ptr_val = self
+                    .variables
+                    .get(&assign_stmt.lhs)
+                    .expect("could not find variable for assignment");
+
+                self.builder
+                    .build_store(*ptr_val, rhs_val)
+                    .expect("failed to build store");
+                Some(rhs_val)
+            }
+            Stmt::IfStmt(if_stmt) => Some(self.compile_if_stmt(if_stmt)),
+            Stmt::Else(_) => None,
             Stmt::FnCall(func_call) => todo!(),
         }
     }
@@ -211,8 +231,8 @@ impl<'ctx> CodeGen<'ctx> {
                         "Code Generation: found non-binary operator: {op:?} when expected otherwise"
                     );
                 }
-                if *ty != VarType::Integer {
-                    panic!("unexpected type: got{ty:?} but expected Integer")
+                if !((*ty == VarType::Integer) || (*ty == VarType::Bool)) {
+                    panic!("unexpected type: got {ty:?} but expected Integer or Bool")
                 }
 
                 let l = self.compile_expr_int(lhs);
@@ -307,7 +327,6 @@ impl<'ctx> CodeGen<'ctx> {
                     .cloned()
                     .expect("failed to find function call in hashmap");
 
-                //FIXME: This compile expr should not be specific to ints
                 let arg_values: Vec<BasicMetadataValueEnum> = func_call
                     .args
                     .iter()
@@ -353,5 +372,83 @@ impl<'ctx> CodeGen<'ctx> {
 
         let llvm_type = self.llvm_type(ty);
         builder.build_alloca(llvm_type, name).unwrap()
+    }
+    fn compile_if_stmt(&mut self, if_stmt: &IfStmt) -> IntValue<'ctx> {
+        let expr_val = self.compile_expr_int(&if_stmt.condition);
+        let expr_bool = self
+            .builder
+            .build_int_truncate(expr_val, self.context.bool_type(), "bool")
+            .expect("failed to truncate int to bool");
+
+        let func = self.current_fn.unwrap();
+        let then_block = self.context.append_basic_block(func, "then");
+        let else_block = self.context.append_basic_block(func, "else");
+        let merge_block = self.context.append_basic_block(func, "merge");
+
+        self.builder
+            .build_conditional_branch(expr_bool, then_block, else_block)
+            .unwrap();
+
+        self.builder.position_at_end(then_block);
+        let mut then_val = self.context.i64_type().const_int(0, false); //?
+        for stmt in &if_stmt.body.inner {
+            if let Some(val) = self.compile_stmt(stmt) {
+                then_val = val;
+            }
+        }
+
+        let then_end = self.builder.get_insert_block().unwrap();
+        let then_has_term = then_end.get_terminator().is_some();
+        if !then_has_term {
+            self.builder
+                .build_unconditional_branch(merge_block)
+                .unwrap();
+        }
+
+        if if_stmt.else_stmt.is_some() {
+            self.builder.position_at_end(else_block);
+
+            let mut _else_val = self.context.i32_type().const_int(0, false);
+            for stmt in &if_stmt.else_stmt.as_ref().unwrap().body.inner {
+                if let Some(v) = self.compile_stmt(stmt) {
+                    _else_val = v;
+                }
+            }
+
+            let else_end = self.builder.get_insert_block().unwrap();
+            let else_has_term = else_end.get_terminator().is_some();
+            if !else_has_term {
+                self.builder
+                    .build_unconditional_branch(merge_block)
+                    .unwrap();
+            }
+            if then_has_term && else_has_term {
+                unsafe {
+                    merge_block.delete().unwrap();
+                }
+                return self.context.i64_type().const_int(0, false);
+            }
+            // if i ever decide to add stuff like: let foo: i32 = if (bar) {5} else{7}
+            else {
+                self.builder.position_at_end(merge_block);
+                // let phi = self
+                //     .builder
+                //     .build_phi(self.context.i32_type(), "phi")
+                //     .unwrap();
+                // if !then_has_term {
+                //     phi.add_incoming(&[(&then_val, then_end)]);
+                // }
+                // if !else_has_term {
+                //     phi.add_incoming(&[(&else_val, else_end)]);
+                // }
+                // return phi.as_basic_value().into_int_value();
+                return self.context.i64_type().const_int(0, false);
+            }
+        } else {
+            //Unsafe b/c references to this block may exist and would then point to invalid value if deleted
+            // this is not the case so unsafe is okay here
+            unsafe { else_block.delete().unwrap() }
+        }
+        then_val
     }
 }

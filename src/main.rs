@@ -7,7 +7,7 @@ mod tokenizer;
 
 use std::{fs::File, io::Read};
 
-use clap::{Parser, arg, command};
+use clap::Parser;
 use inkwell::context::Context;
 
 use crate::{
@@ -26,14 +26,18 @@ struct Args {
 
     /// Show LLVM IR
     #[arg(long)]
-    show_llvm: bool,
+    emit_llvm: bool,
+
+    #[arg(long)]
+    emit_asm: bool,
 }
 
 fn main() {
     let args = Args::parse();
 
     let path = &args.path;
-    let show_llvm = args.show_llvm;
+    let show_llvm = args.emit_llvm;
+    let show_asm = args.emit_asm;
 
     // if these fail, the application is completely unusable. expect is warranted
     let mut file = File::open(path).expect("failed to find file");
@@ -61,5 +65,5 @@ fn main() {
 
     let context = Context::create();
     let mut codegen = CodeGen::new(&context);
-    codegen.compile_program(file_ast, show_llvm);
+    codegen.compile_program(file_ast, show_llvm, show_asm);
 }
