@@ -13,7 +13,7 @@ func calculate_average(a: f32, b: f32, c: f32): f32 {
 }
 
 func main(): i32 {
-    let test1: f32 = 85.5;
+    let test1: f32 = 85;
     let test2: f32 = 92.0;
     let test3: f32 = 78.25;
     

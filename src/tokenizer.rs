@@ -111,6 +111,8 @@ impl Display for BoolLit {
 pub struct Tokenizer {
     input_iterator: Peekable<IntoIter<char>>,
     token_map: HashMap<String, Token>,
+    int_regex: Regex,
+    float_regex: Regex,
 }
 impl Tokenizer {
     pub fn new(value: String) -> Self {
@@ -145,6 +147,9 @@ impl Tokenizer {
         Self {
             input_iterator: value.chars().collect::<Vec<_>>().into_iter().peekable(),
             token_map: map,
+            float_regex: Regex::new(r"^[+-]?(?:\d+\.\d+|\d+\.|\.\d+)$")
+                .expect("invalid float regex supplied"),
+            int_regex: Regex::new(r"^[+-]?\d+$").expect("invalid int regex supplied"),
         }
     }
     fn is_delimiter(ch: char) -> bool {
@@ -195,13 +200,9 @@ impl Tokenizer {
             return Token::Eof;
         }
 
-        let float_regex =
-            Regex::new(r"^[+-]?(?:\d+\.\d+|\d+\.|\.\d+)$").expect("invalid float regex supplied");
-        let int_regex = Regex::new(r"^[+-]?\d+$").expect("invalid int regex supplied");
-
-        if int_regex.is_match(lexeme.as_str()) {
+        if self.int_regex.is_match(lexeme.as_str()) {
             return Token::IntegerLiteral(lexeme);
-        } else if float_regex.is_match(lexeme.as_str()) {
+        } else if self.float_regex.is_match(lexeme.as_str()) {
             return Token::FloatLiteral(lexeme);
         }
 

@@ -1,0 +1,19 @@
+func add(a: i32, b: i32): i32 {
+    return a + b;
+}
+
+func main(): i32 {
+
+    let a: i32 = 9;
+    a = 5;
+
+    let b: i32 = 10;
+
+    if (a > b) {
+        a = add(a, 1);
+    } else {
+        b = add(b, 2);
+    }
+
+    return add(a, b);
+}

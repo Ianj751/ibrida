@@ -58,7 +58,7 @@ impl SemContext {
             scopes: vec![SymbolTable {
                 children: None,
                 parent: None,
-                symbols: HashMap::new(),
+                symbols: HashMap::new(), //put ftoi and itof in here
             }],
             curr_scope: 0,
         }
