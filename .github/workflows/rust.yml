@@ -19,7 +19,7 @@ jobs:
 
     - name: Set LLVM environment variables
       run: |
-        echo "LLVM_SYS_180_PREFIX=${{ env.LLVM_SYS_180_PREFIX }}" >> $GITHUB_ENV
+        echo "LLVM_SYS_181_PREFIX=${{ env.LLVM_SYS_181_PREFIX }}" >> $GITHUB_ENV
         echo "LIBCLANG_PATH=${{ env.LLVM_PATH }}/lib" >> $GITHUB_ENV
         
     - name: Build
