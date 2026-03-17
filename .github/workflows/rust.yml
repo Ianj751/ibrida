@@ -15,11 +15,12 @@ jobs:
     - name: Install LLVM and Clang
       uses: KyleMayes/install-llvm-action@v2.0.8
       with:
-        version: "18"
+        version: "18.1" 
 
     - name: Set LLVM environment variables
       run: |
         echo "LLVM_SYS_181_PREFIX=${{ env.LLVM_PATH }}" >> $GITHUB_ENV
+        echo "${{ env.LLVM_PATH }}/bin" >> $GITHUB_PATH
         echo "LIBCLANG_PATH=${{ env.LLVM_PATH }}/lib" >> $GITHUB_ENV
         
     - name: Build
