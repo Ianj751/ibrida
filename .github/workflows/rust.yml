@@ -19,12 +19,10 @@ jobs:
 
     - name: Set LLVM environment variables
       run: |
-        LLVM_CONFIG=$(which llvm-config)
-        LLVM_PATH=$(dirname $(dirname $LLVM_CONFIG))
-    
-        echo "LLVM_SYS_181_PREFIX=$LLVM_PATH" >> $GITHUB_ENV
-        echo "$LLVM_PATH/bin" >> $GITHUB_PATH
-        echo "LIBCLANG_PATH=$LLVM_PATH/lib" >> $GITHUB_ENV
+        which llvm-config || (echo "llvm-config not found on PATH!" && exit 1)
+        LLVM_PREFIX=$(llvm-config --prefix)
+        echo "LLVM_SYS_181_PREFIX=$LLVM_PREFIX" >> $GITHUB_ENV
+        echo "LIBCLANG_PATH=$LLVM_PREFIX/lib" >> $GITHUB_ENV
             
     - name: Build
       run: cargo build --verbose
