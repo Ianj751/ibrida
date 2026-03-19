@@ -1,6 +1,8 @@
 /target
 TODOs.txt
 basic
-ibrida.ll
-ibrida.o
-ibrida.s
+*.ll
+*.out
+*.s
+*.o
+flamegraph.svg

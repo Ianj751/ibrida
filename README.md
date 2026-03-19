@@ -12,9 +12,18 @@ Create a compiler for my own programming language called Ibrida
 - [x] Implement constructing token vector
 - [x] Construct an AST for basic.ibi with a Pratt Parser from the token vector
 - [x] Create an annotated / typed AST using semantic analysis
-- [x] Compile basic.ibi to LLVM IR
-- [x] Convert the IR to an executable
-- [ ] Do the same for main1.ibi and main2.ibi
+- [x] Compile basic.ibi, basicif.ibi, and floats.ibi to LLVM IR
+- [ ] Linking for cstdlib functions like puts
 
-<img width="1209" height="653" alt="Screenshot 2026-03-03 134218" src="https://github.com/user-attachments/assets/11a6c3b7-5654-4c96-a295-7caea579fd64" />
-<img width="921" height="310" alt="Screenshot 2026-03-03 134425" src="https://github.com/user-attachments/assets/732860a3-fb23-48a1-befe-c4e0f7a6f7dd" />
+## How to use
+```bash
+$ ./ibrida main.ibi --emit-llvm --emit-asm
+```
+The above command outputs:
+* textual LLVM file (ibrida.ll)
+* an assembly file in your machine's architecture (ibrida.s)
+* a .o file which can be linked with clang or any c compiler as shown below
+```bash
+$ clang output.o -o output
+$ ./output ; echo $?
+```

@@ -24,10 +24,11 @@ struct Args {
     /// Path to .ibi file to compile
     path: String,
 
-    /// Show LLVM IR
+    /// Outputs LLVM IR to an ibrida.ll file
     #[arg(long)]
     emit_llvm: bool,
 
+    /// Outputs assembly to an ibrida.s file
     #[arg(long)]
     emit_asm: bool,
 }
@@ -85,5 +86,5 @@ fn main() {
         cg_time.elapsed().unwrap()
     );
 
-    println!("Total Time Elapsed: {:?}", compile_time.elapsed().unwrap())
+    println!("Total Time Elapsed: {:?}", compile_time.elapsed().unwrap());
 }

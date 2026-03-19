@@ -12,8 +12,6 @@ use crate::tokenizer::{Operator, Token};
 pub enum ParseError {
     #[error("invalid token: expected {expected:?} but found {found:?}")]
     InvalidToken { expected: Token, found: Token },
-    #[error("invalid token: expected an operator, but found `{0:?}`")]
-    ExpectedOperator(Token),
     #[error("invalid token: expected a variable type, but found `{0:?}`")]
     ExpectedType(Token),
     #[error("unexpected end of token stream")]

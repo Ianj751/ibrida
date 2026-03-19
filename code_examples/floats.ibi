@@ -1,5 +1,5 @@
 func is_passing_grade(score: f32): bool {
-    if (score >= 60.0) {
+    if (score >= 70.0) {
         return true;
     } else {
         return false;
@@ -13,28 +13,28 @@ func calculate_average(a: f32, b: f32, c: f32): f32 {
 }
 
 func main(): i32 {
-    let test1: f32 = 85;
+    let test1: f32 = 85.0;
     let test2: f32 = 92.0;
     let test3: f32 = 78.25;
-    
-    let avg: i32 = calculate_average(test1, test2, test3);
-    
+
+    let avg: f32 = calculate_average(test1, test2, test3);
+
     let passed: bool = is_passing_grade(avg);
-    
+
     let bonus_points: i32 = 10;
     let base_score: i32 = 50;
-    
+
     if (passed) {
         base_score = base_score + bonus_points;
     } else {
         base_score = base_score - 5;
     }
-    
+
     let has_extra_credit: bool = true;
-    
+
     if (has_extra_credit) {
         base_score = base_score + 15;
     }
-    
+
     return base_score;
 }

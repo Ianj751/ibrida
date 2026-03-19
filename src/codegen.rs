@@ -9,7 +9,8 @@ use inkwell::{
     targets::{Target, TargetMachine},
     types::BasicType,
     values::{
-        BasicMetadataValueEnum, BasicValue, FunctionValue, GlobalValue, IntValue, PointerValue,
+        BasicMetadataValueEnum, BasicValue, BasicValueEnum, FloatValue, FunctionValue, GlobalValue,
+        IntValue, PointerValue,
     },
 };
 
@@ -17,6 +18,7 @@ use crate::{
     ast::{Declaration, Expression, FuncDecl, IfStmt, LetStmt, Program, Stmt, VarType},
     tokenizer::Operator,
 };
+use thiserror::Error;
 
 /*
 * Might have errors in here be all panics
@@ -24,6 +26,16 @@ use crate::{
 * If theres an error produced by inkwell then theres probably something wrong with the way I set it up
 * Philosophy: if Programmer Error then panic, elif User Error then thiserror
 */
+
+//CG Error is an internal error enum for backtracking on failure
+// not the best option but the alternative is an ast redesign which i dont wanna do b/c lazy
+#[derive(Debug, Error, PartialEq, Eq)]
+enum CGError {
+    #[error("{0}")]
+    CustomError(String),
+    #[error("")]
+    InvalidExpressionTypes,
+}
 
 //shoutout: https://createlang.rs/03_secondlang/codegen.html
 pub struct CodeGen<'ctx> {
@@ -46,7 +58,8 @@ pub struct CodeGen<'ctx> {
     /// Map from function names to LLVM functions
     functions: HashMap<String, FunctionValue<'ctx>>,
 
-    current_fn: Option<FunctionValue<'ctx>>,
+    current_fn: Option<(FunctionValue<'ctx>, VarType)>,
+    current_return: Option<BasicValueEnum<'ctx>>,
 }
 //ASSUMPTION: the program has been verified to be semantically sound
 impl<'ctx> CodeGen<'ctx> {
@@ -61,6 +74,7 @@ impl<'ctx> CodeGen<'ctx> {
             globals: HashMap::new(),
             functions: HashMap::new(),
             current_fn: None,
+            current_return: None,
         }
     }
     //wth is going on here lifetime wise???
@@ -96,13 +110,19 @@ impl<'ctx> CodeGen<'ctx> {
                             .set_name(&param.name);
                     }
 
-                    self.current_fn = Some(func_val);
+                    self.current_fn = Some((func_val, func_decl.decl_return_type));
                     self.functions.insert(func_decl.name.clone(), func_val);
 
                     self.codegen_func_body(&func_decl);
                 }
                 Declaration::Var(var_decl) => {
-                    let _ = self.compile_vardecl(&var_decl);
+                    let ty = &var_decl.declared_type;
+                    if (*ty == VarType::Integer) || (*ty == VarType::Bool) {
+                        self.compile_vardecl(&var_decl)
+                            .expect("invalid variable declaration");
+                    } else if *ty == VarType::Float {
+                        todo!("make compile_var_decl_float");
+                    }
                 }
             }
         }
@@ -134,7 +154,7 @@ impl<'ctx> CodeGen<'ctx> {
                 )
                 .expect("failed to write assembly file");
         }
-        let output_path = Path::new("ibrida.o");
+        let output_path = Path::new("output.out");
         target_machine
             .write_to_file(
                 &self.module,
@@ -163,16 +183,18 @@ impl<'ctx> CodeGen<'ctx> {
         self.builder.position_at_end(entry);
 
         for (i, p) in field_list.iter().enumerate() {
-            let param_val = func.get_nth_param(i as u32).unwrap().into_int_value();
+            let param_val = func.get_nth_param(i as u32).unwrap();
 
             let alloca = self.create_entry_block_alloca(&func, &p.name, &p.field_type);
             self.builder.build_store(alloca, param_val).unwrap();
             self.variables.insert(p.name.clone(), alloca);
         }
 
-        let mut last_val = None;
+        // FIXME: Allow for statements that result in floats??
+        // do statements even need to result in anything??
+
         for s in &body.inner {
-            last_val = self.compile_stmt(s);
+            self.compile_stmt(s).expect("failed to compile statment");
         }
 
         if self
@@ -182,30 +204,46 @@ impl<'ctx> CodeGen<'ctx> {
             .get_terminator()
             .is_none()
         {
-            if let Some(val) = last_val {
+            if let Some(val) = self.current_return {
                 self.builder.build_return(Some(&val)).unwrap();
             } else {
                 let zero = self.context.i64_type().const_int(0, false);
                 self.builder.build_return(Some(&zero)).unwrap();
             }
         }
+        self.current_return = None;
     }
-    fn compile_stmt(&mut self, stmt: &Stmt) -> Option<IntValue<'ctx>> {
+    fn compile_stmt(&mut self, stmt: &Stmt) -> Result<(), CGError> {
         match stmt {
             Stmt::Return(return_stmt) => {
-                let return_val = self.compile_expr_int(&return_stmt.expression);
-                let basic_val = return_val.as_basic_value_enum();
+                let return_val: BasicValueEnum = if self.current_fn.unwrap().1 == VarType::Integer
+                    || self.current_fn.unwrap().1 == VarType::Bool
+                {
+                    self.compile_expr_int(&return_stmt.expression)?.into()
+                } else {
+                    self.compile_expr_float(&return_stmt.expression)?.into()
+                };
 
                 self.builder
-                    .build_return(Some(&basic_val))
+                    .build_return(Some(&return_val))
                     .expect("failed to build return");
-
-                Some(return_val)
+                self.current_return = Some(return_val);
             }
-            Stmt::VarDecl(let_stmt) => Some(self.compile_vardecl(let_stmt)),
+            Stmt::VarDecl(let_stmt) => {
+                self.compile_vardecl(let_stmt)?;
+            }
             Stmt::VarAssign(assign_stmt) => {
-                let rhs_val = self.compile_expr_int(&assign_stmt.rhs);
-                // let ty = self.llvm_type(assign_stmt.checked_expr_type.as_ref().unwrap());
+                let rhs_val: BasicValueEnum = if let Some(ty) = assign_stmt.checked_expr_type {
+                    match ty {
+                        VarType::Bool | VarType::Integer => {
+                            self.compile_expr_int(&assign_stmt.rhs)?.into()
+                        }
+                        VarType::Float => self.compile_expr_float(&assign_stmt.rhs)?.into(),
+                        _ => panic!("unexpected unknown type"),
+                    }
+                } else {
+                    panic!("assign statement rhs type was None");
+                };
 
                 let ptr_val = self
                     .variables
@@ -215,15 +253,17 @@ impl<'ctx> CodeGen<'ctx> {
                 self.builder
                     .build_store(*ptr_val, rhs_val)
                     .expect("failed to build store");
-                Some(rhs_val)
             }
-            Stmt::IfStmt(if_stmt) => Some(self.compile_if_stmt(if_stmt)),
-            Stmt::Else(_) => None,
+            Stmt::IfStmt(if_stmt) => {
+                self.compile_if_stmt(if_stmt)?;
+            }
+            Stmt::Else(_) => {}
             Stmt::FnCall(func_call) => todo!(),
-        }
+        };
+        Ok(())
     }
     //Produces values for expressions that result in integers
-    fn compile_expr_int(&mut self, expr: &Expression) -> IntValue<'ctx> {
+    fn compile_expr_int(&mut self, expr: &Expression) -> Result<IntValue<'ctx>, CGError> {
         match expr {
             Expression::BinaryExpr { op, lhs, rhs, ty } => {
                 if !op.is_binary() {
@@ -231,14 +271,51 @@ impl<'ctx> CodeGen<'ctx> {
                         "Code Generation: found non-binary operator: {op:?} when expected otherwise"
                     );
                 }
+
                 if !((*ty == VarType::Integer) || (*ty == VarType::Bool)) {
-                    panic!("unexpected type: got {ty:?} but expected Integer or Bool")
+                    return Err(CGError::InvalidExpressionTypes);
                 }
 
-                let l = self.compile_expr_int(lhs);
-                let r = self.compile_expr_int(rhs);
+                let l = match lhs.get_expr_type() {
+                    VarType::Bool | VarType::Integer => self.compile_expr_int(lhs)?,
+                    VarType::Float => {
+                        let l = self.compile_expr_float(lhs)?;
+                        let r = self.compile_expr_float(rhs)?;
 
-                match op {
+                        let val = match op {
+                            Operator::BoolEq => self
+                                .builder
+                                .build_float_compare(inkwell::FloatPredicate::OEQ, l, r, "eq")
+                                .expect("think of a better expect msg"),
+                            Operator::Less => self
+                                .builder
+                                .build_float_compare(inkwell::FloatPredicate::OLT, l, r, "lt")
+                                .expect("think of a better expect msg"),
+                            Operator::LessEq => self
+                                .builder
+                                .build_float_compare(inkwell::FloatPredicate::OLE, l, r, "le")
+                                .expect("think of a better expect msg"),
+                            Operator::Greater => self
+                                .builder
+                                .build_float_compare(inkwell::FloatPredicate::OGT, l, r, "gt")
+                                .expect("think of a better expect msg"),
+                            Operator::GreaterEq => self
+                                .builder
+                                .build_float_compare(inkwell::FloatPredicate::OGE, l, r, "ge")
+                                .expect("think of a better expect msg"),
+                            Operator::NotEq => self
+                                .builder
+                                .build_float_compare(inkwell::FloatPredicate::ONE, l, r, "le")
+                                .expect("think of a better expect msg"),
+                            o => panic!("expected float comparison, got {o:?}"),
+                        };
+                        return Ok(val);
+                    }
+                    _ => panic!("unexpected unknown vartype"),
+                };
+                let r = self.compile_expr_int(rhs)?;
+
+                let val = match op {
                     Operator::Addition => self
                         .builder
                         .build_int_add(l, r, "add")
@@ -285,25 +362,30 @@ impl<'ctx> CodeGen<'ctx> {
                         .build_int_compare(inkwell::IntPredicate::NE, l, r, "le")
                         .expect("think of a better expect msg"),
                     o => panic!("operator {o:?} can not be used here"),
-                }
-            }
-            Expression::Literal(lit, lit_type) => {
-                let literal = match lit_type {
-                    VarType::Integer => lit.parse::<i32>().unwrap(),
-                    t => panic!("expected integer, got {t}"),
                 };
-                self.context.i32_type().const_int(literal as u64, true)
+                Ok(val)
             }
-            Expression::UnaryExpr { op, operand, ty } => {
+            Expression::Literal(lit, lit_type) => match lit_type {
+                VarType::Integer => {
+                    let literal = lit.parse::<i32>().unwrap();
+                    Ok(self.context.i32_type().const_int(literal as u64, true))
+                }
+                VarType::Bool => {
+                    let literal = lit.parse::<bool>().unwrap();
+                    Ok(self.context.bool_type().const_int(literal as u64, false))
+                }
+                t => panic!("expected integer or bool, got {t}"),
+            },
+            Expression::UnaryExpr { op, operand, ty: _ } => {
                 if !op.is_unary() {
                     panic!("got operator {op:?} when expected unary operator");
                 }
-                let val = self.compile_expr_int(operand);
+                let val = self.compile_expr_int(operand)?;
                 match op {
-                    Operator::BoolNot => self
+                    Operator::BoolNot => Ok(self
                         .builder
                         .build_not(val, "not")
-                        .expect("failed to produce int value for NOT expression"),
+                        .expect("failed to produce int value for NOT expression")),
                     _ => unreachable!("if got here, update code for additional unary operators"),
                 }
             }
@@ -318,7 +400,7 @@ impl<'ctx> CodeGen<'ctx> {
                     .build_load(self.context.i32_type(), *var_ptr, var_name)
                     .expect("failed to build load instruction");
 
-                val.into_int_value()
+                Ok(val.into_int_value())
             }
             Expression::FuncCall(func_call, _) => {
                 let func_val = self
@@ -330,20 +412,128 @@ impl<'ctx> CodeGen<'ctx> {
                 let arg_values: Vec<BasicMetadataValueEnum> = func_call
                     .args
                     .iter()
-                    .map(|a| self.compile_expr_int(a).into())
-                    .collect();
+                    .map(|a| match a.get_expr_type() {
+                        VarType::Bool | VarType::Integer => {
+                            self.compile_expr_int(a).map(|v| v.into())
+                        }
+                        VarType::Float => self.compile_expr_float(a).map(|v| v.into()),
+                        _ => panic!("unknown expression type unexpected"),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
 
                 let call = self
                     .builder
                     .build_call(func_val, &arg_values, "call")
                     .expect("failed to build function call");
 
-                call.try_as_basic_value().unwrap_basic().into_int_value()
+                Ok(call.try_as_basic_value().unwrap_basic().into_int_value())
             }
         }
     }
-    fn compile_vardecl(&mut self, let_stmt: &LetStmt) -> IntValue<'ctx> {
-        let rhs_val = self.compile_expr_int(&let_stmt.rhs);
+    fn compile_expr_float(&mut self, expr: &Expression) -> Result<FloatValue<'ctx>, CGError> {
+        match expr {
+            Expression::BinaryExpr { op, lhs, rhs, ty } => {
+                if !op.is_binary() || op.is_comparison() {
+                    panic!(
+                        "Code Generation: found non-binary operator: {op:?} when expected otherwise"
+                    );
+                }
+                if *ty != VarType::Float {
+                    return Err(CGError::InvalidExpressionTypes);
+                }
+
+                let l = self.compile_expr_float(lhs)?;
+                let r = self.compile_expr_float(rhs)?;
+
+                let val = match op {
+                    Operator::Addition => self
+                        .builder
+                        .build_float_add(l, r, "add")
+                        .expect("think of a better expect msg"),
+                    Operator::Subtraction => self
+                        .builder
+                        .build_float_sub(l, r, "sub")
+                        .expect("think of a better expect msg"),
+                    Operator::Division => self
+                        .builder
+                        .build_float_div(l, r, "div")
+                        .expect("think of a better expect msg"),
+                    Operator::Multiplication => self
+                        .builder
+                        .build_float_mul(l, r, "mul")
+                        .expect("think of a better expect msg"),
+
+                    o => panic!("operator {o:?} can not be used here"),
+                };
+
+                Ok(val)
+            }
+            Expression::Literal(lit, lit_type) => {
+                let literal = match lit_type {
+                    VarType::Float => lit.parse::<f32>().unwrap(),
+                    t => panic!("expected float, got {t}"),
+                };
+                Ok(self.context.f32_type().const_float(literal as f64))
+            }
+            Expression::UnaryExpr {
+                op,
+                operand: _,
+                ty: _,
+            } => {
+                if !op.is_unary() {
+                    panic!("got operator {op:?} when expected unary operator");
+                }
+                panic!("Unary Expressions are disallowed for floats");
+            }
+            Expression::Var(var_name, _) => {
+                let var_ptr = self
+                    .variables
+                    .get(var_name)
+                    .expect("failed to find variable in hashmap");
+
+                let val = self
+                    .builder
+                    .build_load(self.context.f32_type(), *var_ptr, var_name)
+                    .expect("failed to build load instruction");
+
+                Ok(val.into_float_value())
+            }
+            Expression::FuncCall(func_call, _) => {
+                let func_val = self
+                    .functions
+                    .get(&func_call.id)
+                    .cloned()
+                    .expect("failed to find function call in hashmap");
+
+                let arg_values: Vec<BasicMetadataValueEnum> = func_call
+                    .args
+                    .iter()
+                    .map(|a| match a.get_expr_type() {
+                        VarType::Bool | VarType::Integer => {
+                            self.compile_expr_int(a).map(|v| v.into())
+                        }
+                        VarType::Float => self.compile_expr_float(a).map(|v| v.into()),
+                        _ => panic!("unknown expression type unexpected"),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                let call = self
+                    .builder
+                    .build_call(func_val, &arg_values, "call")
+                    .expect("failed to build function call");
+
+                Ok(call.try_as_basic_value().unwrap_basic().into_float_value())
+            }
+        }
+    }
+    fn compile_vardecl(&mut self, let_stmt: &LetStmt) -> Result<(), CGError> {
+        let rhs_val: BasicValueEnum = if let_stmt.declared_type == VarType::Integer
+            || let_stmt.declared_type == VarType::Bool
+        {
+            self.compile_expr_int(&let_stmt.rhs)?.into()
+        } else {
+            self.compile_expr_float(&let_stmt.rhs)?.into()
+        };
         let ty = self.llvm_type(&let_stmt.declared_type);
         let ptr_val = self
             .builder
@@ -354,7 +544,7 @@ impl<'ctx> CodeGen<'ctx> {
             .build_store(ptr_val, rhs_val)
             .expect("failed to build store");
         self.variables.insert(let_stmt.lhs.clone(), ptr_val);
-        rhs_val
+        Ok(())
     }
     fn create_entry_block_alloca(
         &self,
@@ -373,28 +563,30 @@ impl<'ctx> CodeGen<'ctx> {
         let llvm_type = self.llvm_type(ty);
         builder.build_alloca(llvm_type, name).unwrap()
     }
-    fn compile_if_stmt(&mut self, if_stmt: &IfStmt) -> IntValue<'ctx> {
-        let expr_val = self.compile_expr_int(&if_stmt.condition);
+    fn compile_if_stmt(&mut self, if_stmt: &IfStmt) -> Result<(), CGError> {
+        let expr_val = self.compile_expr_int(&if_stmt.condition)?;
         let expr_bool = self
             .builder
             .build_int_truncate(expr_val, self.context.bool_type(), "bool")
             .expect("failed to truncate int to bool");
 
-        let func = self.current_fn.unwrap();
+        let func = self.current_fn.unwrap().0;
         let then_block = self.context.append_basic_block(func, "then");
-        let else_block = self.context.append_basic_block(func, "else");
         let merge_block = self.context.append_basic_block(func, "merge");
+
+        let else_block = if if_stmt.else_stmt.is_some() {
+            self.context.append_basic_block(func, "else")
+        } else {
+            merge_block
+        };
 
         self.builder
             .build_conditional_branch(expr_bool, then_block, else_block)
             .unwrap();
 
         self.builder.position_at_end(then_block);
-        let mut then_val = self.context.i64_type().const_int(0, false); //?
         for stmt in &if_stmt.body.inner {
-            if let Some(val) = self.compile_stmt(stmt) {
-                then_val = val;
-            }
+            self.compile_stmt(stmt)?;
         }
 
         let then_end = self.builder.get_insert_block().unwrap();
@@ -408,11 +600,8 @@ impl<'ctx> CodeGen<'ctx> {
         if if_stmt.else_stmt.is_some() {
             self.builder.position_at_end(else_block);
 
-            let mut _else_val = self.context.i32_type().const_int(0, false);
             for stmt in &if_stmt.else_stmt.as_ref().unwrap().body.inner {
-                if let Some(v) = self.compile_stmt(stmt) {
-                    _else_val = v;
-                }
+                self.compile_stmt(stmt)?;
             }
 
             let else_end = self.builder.get_insert_block().unwrap();
@@ -426,29 +615,18 @@ impl<'ctx> CodeGen<'ctx> {
                 unsafe {
                     merge_block.delete().unwrap();
                 }
-                return self.context.i64_type().const_int(0, false);
+                return Ok(());
             }
             // if i ever decide to add stuff like: let foo: i32 = if (bar) {5} else{7}
             else {
                 self.builder.position_at_end(merge_block);
-                // let phi = self
-                //     .builder
-                //     .build_phi(self.context.i32_type(), "phi")
-                //     .unwrap();
-                // if !then_has_term {
-                //     phi.add_incoming(&[(&then_val, then_end)]);
-                // }
-                // if !else_has_term {
-                //     phi.add_incoming(&[(&else_val, else_end)]);
-                // }
-                // return phi.as_basic_value().into_int_value();
-                return self.context.i64_type().const_int(0, false);
+
+                return Ok(());
             }
         } else {
-            //Unsafe b/c references to this block may exist and would then point to invalid value if deleted
-            // this is not the case so unsafe is okay here
-            unsafe { else_block.delete().unwrap() }
+            // No else statement: position at merge_block for subsequent statements
+            self.builder.position_at_end(merge_block);
         }
-        then_val
+        Ok(())
     }
 }

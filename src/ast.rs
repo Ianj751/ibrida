@@ -2,7 +2,7 @@ use std::fmt::{self, Display, Formatter};
 
 use crate::tokenizer::Operator;
 
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum VarType {
     #[default]
     Unknown,
@@ -92,6 +92,17 @@ pub enum Expression {
         ty: VarType,
     }, //parent, [lhs, rhs]
     FuncCall(FuncCall, VarType),
+}
+impl Expression {
+    pub fn get_expr_type(&self) -> VarType {
+        match self {
+            Expression::Literal(_, ty) => *ty,
+            Expression::UnaryExpr { ty, .. } => *ty,
+            Expression::Var(_, ty) => *ty,
+            Expression::BinaryExpr { ty, .. } => *ty,
+            Expression::FuncCall(_, ty) => *ty,
+        }
+    }
 }
 
 //let foo: i32 = 69;
