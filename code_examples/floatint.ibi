@@ -1,0 +1,8 @@
+func main(): i32 {
+    let pi: f32 = 3.14159;
+    let radius: i32 = 9;
+    let f_area: f32 = pi * itof(radius * radius);
+    let i_area: i32 = ftoi(pi) * radius * radius;
+
+    return ftoi(f_area) + i_area;
+}

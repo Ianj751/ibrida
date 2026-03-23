@@ -58,7 +58,23 @@ impl SemContext {
             scopes: vec![SymbolTable {
                 children: None,
                 parent: None,
-                symbols: HashMap::new(), //put ftoi and itof in here
+                //built in functions that come from llvm intrinsics or libc functions
+                symbols: HashMap::from([
+                    (
+                        "ftoi".to_string(),
+                        Symbol {
+                            is_const: true,
+                            symbol_type: "func(f32): i32".to_string(),
+                        },
+                    ),
+                    (
+                        "itof".to_string(),
+                        Symbol {
+                            is_const: true,
+                            symbol_type: "func(i32): f32".to_string(),
+                        },
+                    ),
+                ]),
             }],
             curr_scope: 0,
         }
@@ -148,8 +164,6 @@ impl SAVisitor {
                 }
 
                 if op.is_arithmetic() {
-                    //theres gotta be a cleaner way to do this
-                    //boolean arithmetic makes life slightly harder for codegen
                     let has_bool = children
                         .iter()
                         .any(|(_, var_type)| *var_type == VarType::Bool);
@@ -160,8 +174,8 @@ impl SAVisitor {
                     //no implicit conversions btwn data types
                     //this also means float <op> int != float
                     if children[0].1 == children[1].1 {
-                        *expr_ty = children[0].1.clone();
-                        Ok(children[0].1.clone())
+                        *expr_ty = children[0].1;
+                        Ok(children[0].1)
                     } else {
                         Err(SemanticError::InvalidOperands(op.clone()))
                     }
@@ -207,7 +221,7 @@ impl SAVisitor {
                     }
                     None => Err(SemanticError::InvalidSymbolReference(id.clone())),
                 },
-                t => Ok(t.clone()),
+                t => Ok(*t),
             },
             Expression::UnaryExpr {
                 op,
@@ -234,12 +248,12 @@ impl SAVisitor {
             }
             Expression::FuncCall(fn_call, fn_ty) => {
                 self.visit(fn_call)?;
-                let ty = fn_call
+                let ty = *fn_call
                     .return_type
                     .as_ref()
-                    .expect("visit should have embedded type on function call")
-                    .clone();
-                *fn_ty = ty.clone();
+                    .expect("visit should have embedded type on function call");
+
+                *fn_ty = ty;
 
                 Ok(ty)
             }
@@ -268,7 +282,7 @@ impl Visit<Declaration, SemanticError> for SAVisitor {
 }
 impl Visit<FuncDecl, SemanticError> for SAVisitor {
     fn visit(&mut self, visitable: &mut FuncDecl) -> SAResult {
-        self.func_ret_stack.push(visitable.decl_return_type.clone());
+        self.func_ret_stack.push(visitable.decl_return_type);
         if visitable.name == "main" && !visitable.field_list.is_empty() {
             return Err(SemanticError::CustomError(
                 "the main function may not have parameters".into(),
@@ -382,7 +396,7 @@ impl Visit<ReturnStmt, SemanticError> for SAVisitor {
             });
         }
 
-        let last = last.unwrap().clone();
+        let last = *last.unwrap();
         let expr_ty = self.typecheck_expr(&mut visitable.expression)?;
         if last != expr_ty {
             return Err(SemanticError::InvalidFunctionReturn {

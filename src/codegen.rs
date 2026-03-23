@@ -5,12 +5,13 @@ use inkwell::{
     OptimizationLevel,
     builder::Builder,
     context::Context,
+    intrinsics::Intrinsic,
     module::Module,
     targets::{Target, TargetMachine},
     types::BasicType,
     values::{
-        BasicMetadataValueEnum, BasicValue, BasicValueEnum, FloatValue, FunctionValue, GlobalValue,
-        IntValue, PointerValue,
+        BasicMetadataValueEnum, BasicValueEnum, FloatValue, FunctionValue, GlobalValue, IntValue,
+        PointerValue,
     },
 };
 
@@ -31,8 +32,8 @@ use thiserror::Error;
 // not the best option but the alternative is an ast redesign which i dont wanna do b/c lazy
 #[derive(Debug, Error, PartialEq, Eq)]
 enum CGError {
-    #[error("{0}")]
-    CustomError(String),
+    // #[error("{0}")]
+    // CustomError(String),
     #[error("")]
     InvalidExpressionTypes,
 }
@@ -53,7 +54,7 @@ pub struct CodeGen<'ctx> {
     variables: HashMap<String, PointerValue<'ctx>>,
 
     //global variables
-    globals: HashMap<String, GlobalValue<'ctx>>,
+    _globals: HashMap<String, GlobalValue<'ctx>>,
 
     /// Map from function names to LLVM functions
     functions: HashMap<String, FunctionValue<'ctx>>,
@@ -66,12 +67,13 @@ impl<'ctx> CodeGen<'ctx> {
     pub fn new(ctx: &'ctx Context) -> Self {
         let module = ctx.create_module("main");
         let builder = ctx.create_builder();
+
         CodeGen {
             context: ctx,
             module,
             builder,
             variables: HashMap::new(),
-            globals: HashMap::new(),
+            _globals: HashMap::new(),
             functions: HashMap::new(),
             current_fn: None,
             current_return: None,
@@ -129,7 +131,7 @@ impl<'ctx> CodeGen<'ctx> {
         self.module.verify().expect("module verification failed");
         if show_llvm {
             self.module
-                .print_to_file("ibrida.ll")
+                .print_to_file("out.ll")
                 .expect("failed to print to file");
         }
         let target_triple = TargetMachine::get_default_triple();
@@ -150,16 +152,15 @@ impl<'ctx> CodeGen<'ctx> {
                 .write_to_file(
                     &self.module,
                     inkwell::targets::FileType::Assembly,
-                    Path::new("ibrida.s"),
+                    Path::new("out.s"),
                 )
                 .expect("failed to write assembly file");
         }
-        let output_path = Path::new("output.out");
         target_machine
             .write_to_file(
                 &self.module,
                 inkwell::targets::FileType::Object,
-                output_path,
+                Path::new("out.o"),
             )
             .expect("failed to write to object file");
     }
@@ -258,7 +259,7 @@ impl<'ctx> CodeGen<'ctx> {
                 self.compile_if_stmt(if_stmt)?;
             }
             Stmt::Else(_) => {}
-            Stmt::FnCall(func_call) => todo!(),
+            Stmt::FnCall(_func_call) => todo!(),
         };
         Ok(())
     }
@@ -403,11 +404,18 @@ impl<'ctx> CodeGen<'ctx> {
                 Ok(val.into_int_value())
             }
             Expression::FuncCall(func_call, _) => {
-                let func_val = self
-                    .functions
-                    .get(&func_call.id)
-                    .cloned()
-                    .expect("failed to find function call in hashmap");
+                let val = self.functions.get(&func_call.id).cloned();
+                let func_val;
+                if let Some(v) = val {
+                    func_val = v;
+                } else if &func_call.id == "ftoi" {
+                    let arg_val = self
+                        .compile_expr_float(func_call.args.first().unwrap())
+                        .unwrap();
+                    return Ok(self.build_ftoi(arg_val));
+                } else {
+                    panic!("uhoh");
+                }
 
                 let arg_values: Vec<BasicMetadataValueEnum> = func_call
                     .args
@@ -499,11 +507,22 @@ impl<'ctx> CodeGen<'ctx> {
                 Ok(val.into_float_value())
             }
             Expression::FuncCall(func_call, _) => {
-                let func_val = self
-                    .functions
-                    .get(&func_call.id)
-                    .cloned()
-                    .expect("failed to find function call in hashmap");
+                let f_val = self.functions.get(&func_call.id).cloned();
+                let func_val;
+                if let Some(v) = f_val {
+                    func_val = v;
+                } else if &func_call.id == "itof" {
+                    let arg_val = self
+                        .compile_expr_int(func_call.args.first().unwrap())
+                        .unwrap();
+                    let val = self
+                        .builder
+                        .build_signed_int_to_float(arg_val, self.context.f32_type(), "itof")
+                        .unwrap();
+                    return Ok(val);
+                } else {
+                    panic!("uhoh");
+                }
 
                 let arg_values: Vec<BasicMetadataValueEnum> = func_call
                     .args
@@ -628,5 +647,22 @@ impl<'ctx> CodeGen<'ctx> {
             self.builder.position_at_end(merge_block);
         }
         Ok(())
+    }
+    fn build_ftoi(&mut self, float_val: FloatValue<'ctx>) -> IntValue<'ctx> {
+        let ftoi_intrinsic = Intrinsic::find("llvm.fptosi.sat.i32.f32").unwrap();
+        let f32_type = self.context.f32_type();
+        let i32_type = self.context.i32_type();
+
+        let decl = ftoi_intrinsic
+            .get_declaration(&self.module, &[i32_type.into(), f32_type.into()])
+            .unwrap();
+        self.functions.insert("ftoi".into(), decl);
+
+        self.builder
+            .build_call(decl, &[float_val.into()], "fptosi_sat")
+            .unwrap()
+            .try_as_basic_value()
+            .unwrap_basic()
+            .into_int_value()
     }
 }

@@ -62,7 +62,7 @@ fn main() {
         }
     };
     println!(
-        "Semantic Analysis Completed: {:?}",
+        "Syntax Analysis Completed: {:?}",
         parser_time.elapsed().unwrap()
     );
 
