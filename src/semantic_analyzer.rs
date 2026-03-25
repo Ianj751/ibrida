@@ -5,7 +5,7 @@ use thiserror::Error;
 use crate::{
     ast::{
         AssignStmt, BlockStmt, Declaration, ElseStmt, Expression, Field, FuncCall, FuncDecl,
-        IfStmt, LetStmt, Program, ReturnStmt, Stmt, VarType,
+        IfStmt, LetStmt, Program, ReturnStmt, Stmt, VarType, WhileStmt,
     },
     tokenizer::Operator,
 };
@@ -333,6 +333,7 @@ impl Visit<BlockStmt, SemanticError> for SAVisitor {
                 Stmt::IfStmt(if_stmt) => self.visit(if_stmt),
                 Stmt::Else(else_stmt) => self.visit(else_stmt),
                 Stmt::FnCall(func_stmt) => self.visit(func_stmt),
+                Stmt::While(while_stmt) => self.visit(while_stmt),
             }?;
         }
 
@@ -464,6 +465,22 @@ impl Visit<FuncCall, SemanticError> for SAVisitor {
             t => panic!("visit<FuncCall>: invalid type found in symbol table: {t}"),
         };
         visitable.return_type = Some(ty);
+        Ok(())
+    }
+}
+impl Visit<WhileStmt, SemanticError> for SAVisitor {
+    fn visit(&mut self, visitable: &mut WhileStmt) -> Result<(), SemanticError> {
+        let ty = self.typecheck_expr(&mut visitable.condition)?;
+
+        if ty != VarType::Bool {
+            return Err(SemanticError::MismatchedTypes {
+                expected: VarType::Bool.to_string(),
+                found: ty.to_string(),
+            });
+        }
+
+        self.visit(&mut visitable.block)?;
+
         Ok(())
     }
 }

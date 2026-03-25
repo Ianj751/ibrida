@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::ast::{
     AssignStmt, BlockStmt, Declaration, ElseStmt, Expression, Field, FuncCall, FuncDecl, IfStmt,
-    LetStmt, Program, ReturnStmt, Stmt, VarType,
+    LetStmt, Program, ReturnStmt, Stmt, VarType, WhileStmt,
 };
 use crate::tokenizer::{Operator, Token};
 
@@ -232,6 +232,10 @@ fn parse_block_stmt(iter: &mut Peekable<IntoIter<Token>>) -> Result<BlockStmt, P
                 let stmt = parse_if_stmt(iter)?;
                 stmts.push(Stmt::IfStmt(stmt));
             }
+            Token::While => {
+                let stmt = parse_while_loop(iter)?;
+                stmts.push(Stmt::While(stmt));
+            }
 
             t => return Err(ParseError::CustomError(format!("hiii {:?}", t))),
         }
@@ -329,6 +333,17 @@ fn parse_else_stmt(iter: &mut Peekable<IntoIter<Token>>) -> Result<ElseStmt, Par
     let body = parse_block_stmt(iter)?;
     Ok(ElseStmt { body })
 }
+fn parse_while_loop(iter: &mut Peekable<IntoIter<Token>>) -> Result<WhileStmt, ParseError> {
+    expect_token(iter, Token::While)?;
+
+    expect_token(iter, Token::OpenParenthesis)?;
+    let condition = parse_expression(iter, 0)?;
+    expect_token(iter, Token::CloseParenthesis)?;
+
+    let block = parse_block_stmt(iter)?;
+
+    Ok(WhileStmt { condition, block })
+}
 fn parse_fn_call(
     iter: &mut Peekable<IntoIter<Token>>,
     func_id: String,
@@ -361,7 +376,7 @@ fn parse_fn_call(
         return_type: None,
     })
 }
-
+// fn parse_slice(iter: &mut Peekable<IntoIter<Token>>) -> Result<Slice, ParseError> {}
 pub fn parse_program(iter: &mut Peekable<IntoIter<Token>>) -> Result<Program, ParseError> {
     let mut declarations = Vec::new();
     loop {

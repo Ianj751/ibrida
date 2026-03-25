@@ -64,6 +64,7 @@ pub enum Stmt {
     IfStmt(IfStmt),
     Else(ElseStmt),
     FnCall(FuncCall),
+    While(WhileStmt),
 }
 #[derive(Debug, PartialEq, Eq)]
 pub struct ReturnStmt {
@@ -151,3 +152,16 @@ pub struct FuncCall {
     pub args: Vec<Expression>,
     pub return_type: Option<VarType>,
 }
+#[derive(Debug, PartialEq, Eq)]
+pub struct WhileStmt {
+    pub condition: Expression,
+    pub block: BlockStmt,
+}
+
+// // let i_arr: i32[5] = {1, 2, 3, 4, 5};
+// pub struct Slice {
+//     pub id: String,
+//     pub item_type: VarType,
+//     pub items: Vec<Expression>,
+//     pub size: u32,
+// }

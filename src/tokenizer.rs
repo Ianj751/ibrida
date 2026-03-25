@@ -10,6 +10,7 @@ pub enum Token {
     Let,
     If,
     Else,
+    While,
 
     //Types
     Integer32, // will change this to more specific types: i32, u8, etc.
@@ -142,6 +143,7 @@ impl Tokenizer {
             (String::from("else"), Token::Else),
             (String::from("true"), Token::BoolLiteral(BoolLit::True)),
             (String::from("false"), Token::BoolLiteral(BoolLit::False)),
+            (String::from("while"), Token::While),
         ]);
         let value = value.trim().to_owned();
         Self {

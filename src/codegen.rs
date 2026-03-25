@@ -260,6 +260,37 @@ impl<'ctx> CodeGen<'ctx> {
             }
             Stmt::Else(_) => {}
             Stmt::FnCall(_func_call) => todo!(),
+            Stmt::While(while_stmt) => {
+                let func = self.current_fn.unwrap().0;
+                let compare_block = self.context.append_basic_block(func, "compare");
+                let then_block = self.context.append_basic_block(func, "then");
+                let merge_block = self.context.append_basic_block(func, "merge");
+
+                self.builder
+                    .build_unconditional_branch(compare_block)
+                    .unwrap();
+
+                self.builder.position_at_end(compare_block);
+                let cond_val = self.compile_expr_int(&while_stmt.condition)?;
+                let cond_bool = self
+                    .builder
+                    .build_int_truncate(cond_val, self.context.bool_type(), "cond")
+                    .expect("failed to truncate int to boolean");
+                self.builder
+                    .build_conditional_branch(cond_bool, then_block, merge_block)
+                    .unwrap();
+
+                self.builder.position_at_end(then_block);
+                for stmt in &while_stmt.block.inner {
+                    self.compile_stmt(stmt)?;
+                }
+
+                self.builder
+                    .build_unconditional_branch(compare_block)
+                    .unwrap();
+
+                self.builder.position_at_end(merge_block);
+            }
         };
         Ok(())
     }

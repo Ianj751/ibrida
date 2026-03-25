@@ -1,0 +1,7 @@
+func main(): i32 {
+    let foo: i32 = 69;
+    let baz: i32 = foo + 420;
+    libc::puts("Hello, World");
+    libc::printf("%d", baz);
+    return 0;
+}
